@@ -41,8 +41,8 @@
 
 ## 交付
 
-- [ ] 编写启动脚本、PyInstaller spec 和 Windows x64 构建脚本
-- [ ] 完成 README、用户手册、架构/API、威胁模型和变更记录
-- [ ] 执行全量测试、ruff、mypy、源码启动冒烟
-- [ ] 构建并验证 Windows 文件夹发布物
-- [ ] 按完整规格逐项审查并记录结果
+- [x] 编写启动脚本、PyInstaller spec 和 Windows x64 构建脚本
+- [x] 完成 README、用户手册、架构/API、威胁模型和变更记录
+- [x] 执行全量测试、ruff、mypy、源码启动冒烟
+- [x] 构建并验证 Windows 文件夹发布物
+- [x] 按完整规格逐项审查并记录结果

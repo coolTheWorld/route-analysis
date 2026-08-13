@@ -87,3 +87,23 @@ def test_paths_show_center_points_when_yaw_is_missing(qtbot: QtBot) -> None:
     assert canvas.path_point_counts == {"dispatched": 2, "actual": 1}
     assert canvas.missing_yaw_counts == {"dispatched": 1, "actual": 0}
     assert len(canvas.scene().items()) > 3
+
+
+def test_fit_content_keeps_y_up_and_brings_far_coordinates_into_view(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_paths(
+        (PosePoint(1000, 2000, 0), PosePoint(1010, 2005, 0.2)),
+        (),
+        VehicleDimensions(1, 1, 1),
+    )
+
+    canvas.fit_content()
+
+    assert canvas.transform().m11() > 0
+    assert canvas.transform().m22() < 0
+    displayed = canvas.to_display(Point2D(1005, 2002.5))
+    viewport_point = canvas.mapFromScene(displayed.x, displayed.y)
+    assert canvas.viewport().rect().contains(viewport_point)

@@ -40,6 +40,17 @@ def test_touching_boundary_is_warning_not_outside() -> None:
     assert result.minimum_clearance == 0
 
 
+def test_touching_boundary_stays_warning_when_threshold_is_zero() -> None:
+    result = analyze_path(
+        [PosePoint(0, 0, 0)],
+        DIMENSIONS,
+        box(-1, -1, 1, 1),
+        AnalysisSettings(clearance_threshold=0),
+    )
+
+    assert result.status is ClearanceStatus.WARNING
+
+
 def test_continuous_sampling_finds_turning_vehicle_violation() -> None:
     result = analyze_path(
         [PosePoint(-1, 0, 0), PosePoint(1, 0, 1.57)],

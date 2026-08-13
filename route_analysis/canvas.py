@@ -99,6 +99,7 @@ class RouteCanvas(QGraphicsView):
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setScene(QGraphicsScene(self))
         self.scene().setSceneRect(QRectF(-10000, -10000, 20000, 20000))
         self.scale(36, -36)
@@ -162,6 +163,7 @@ class RouteCanvas(QGraphicsView):
         self.undo_stack.setClean()
         self._rebuild_scene()
         self._emit_selection()
+        self.fit_content()
 
     def mark_saved(self) -> None:
         self.undo_stack.setClean()
@@ -196,6 +198,7 @@ class RouteCanvas(QGraphicsView):
             raise ValueError("map direction must be finite")
         self._map_direction = radians
         self._rebuild_scene()
+        self.fit_content()
 
     def set_snap_enabled(self, enabled: bool) -> None:
         self._snap_enabled = enabled
@@ -227,11 +230,28 @@ class RouteCanvas(QGraphicsView):
         self._dimensions = dimensions
         self._results = {"dispatched": None, "actual": None}
         self._rebuild_scene()
+        self.fit_content()
 
     def clear_paths(self) -> None:
         self._paths = {"dispatched": (), "actual": ()}
         self._results = {"dispatched": None, "actual": None}
         self._rebuild_scene()
+        self.fit_content()
+
+    def fit_content(self) -> None:
+        """Fit rendered data into the viewport while preserving the Y-up metric scale."""
+
+        bounds = self.scene().itemsBoundingRect()
+        if bounds.isEmpty() or self.viewport().width() <= 20 or self.viewport().height() <= 20:
+            return
+        padding = max(0.5, max(bounds.width(), bounds.height()) * 0.08)
+        bounds = bounds.adjusted(-padding, -padding, padding, padding)
+        scale_x = (self.viewport().width() - 20) / max(bounds.width(), 1e-9)
+        scale_y = (self.viewport().height() - 20) / max(bounds.height(), 1e-9)
+        metric_scale = min(500.0, max(4.0, min(scale_x, scale_y)))
+        self.resetTransform()
+        self.scale(metric_scale, -metric_scale)
+        self.centerOn(bounds.center())
 
     def set_analysis_results(
         self,
