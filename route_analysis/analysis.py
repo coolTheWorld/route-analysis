@@ -100,7 +100,7 @@ def analyze_path(
     outside_assessments = [item for item in assessments if item.outside]
     if outside_assessments:
         status = ClearanceStatus.OUTSIDE
-    elif minimum.clearance < settings.clearance_threshold:
+    elif minimum.clearance <= 0 or minimum.clearance < settings.clearance_threshold:
         status = ClearanceStatus.WARNING
     else:
         status = ClearanceStatus.SAFE

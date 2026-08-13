@@ -39,6 +39,8 @@ def _coordinate_spin() -> QDoubleSpinBox:
     spin.setDecimals(4)
     spin.setSingleStep(0.1)
     spin.setKeyboardTracking(False)
+    spin.setMinimumWidth(72)
+    spin.setMaximumWidth(115)
     return spin
 
 
@@ -132,12 +134,15 @@ class ControlPanel(QScrollArea):
         dispatched_only = QPushButton("仅下发")
         actual_only = QPushButton("仅实际")
         show_all = QPushButton("全部")
+        fit_button = QPushButton("适应内容")
         dispatched_only.clicked.connect(lambda: self._isolate("dispatched"))
         actual_only.clicked.connect(lambda: self._isolate("actual"))
         show_all.clicked.connect(lambda: self._isolate(None))
+        fit_button.clicked.connect(self.canvas.fit_content)
         isolate.addWidget(dispatched_only)
         isolate.addWidget(actual_only)
         isolate.addWidget(show_all)
+        isolate.addWidget(fit_button)
         layout.addLayout(isolate)
         direction_row = QHBoxLayout()
         direction_row.addWidget(QLabel("地图方向"))
