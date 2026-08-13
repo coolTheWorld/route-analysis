@@ -168,6 +168,8 @@ class AnalysisResult:
     skipped_segments: int = 0
     missing_yaw_indices: tuple[int, ...] = ()
     assessments: tuple[SampleAssessment, ...] = field(default_factory=tuple)
+    position_step: float | None = None
+    yaw_step: float | None = None
 
     @property
     def incomplete(self) -> bool:
