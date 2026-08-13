@@ -112,7 +112,8 @@ def test_cubic_lane_and_closed_lane_are_supported() -> None:
 def test_round_and_miter_join_create_different_outer_corners() -> None:
     points = [Point2D(0, 0), Point2D(2, 0), Point2D(2, 2)]
     sharp = Lane.create("sharp", "Sharp", 2.0, points, default_join=JoinStyle.MITER)
-    rounded = Lane.create("round", "Round", 2.0, points, default_join=JoinStyle.ROUND)
+    rounded = Lane.create("round", "Round", 2.0, points, default_join=JoinStyle.MITER)
+    rounded.anchors[1].join_override = JoinStyle.ROUND
 
     sharp_area = build_lane_area(sharp)
     round_area = build_lane_area(rounded)
@@ -121,7 +122,22 @@ def test_round_and_miter_join_create_different_outer_corners() -> None:
     assert not round_area.covers(Point(2.95, -0.95))
 
 
-def test_anchor_join_override_and_enabled_lane_union() -> None:
+def test_miter_limit_truncates_an_acute_join() -> None:
+    lane = Lane.create(
+        "acute",
+        "Acute",
+        2,
+        [Point2D(0, 0), Point2D(2, 0), Point2D(0.2, 0.2)],
+    )
+
+    truncated = build_lane_area(lane, miter_limit=1)
+    unbounded = build_lane_area(lane, miter_limit=10)
+
+    assert truncated.bounds[2] < 3.1
+    assert unbounded.bounds[2] > 10
+
+
+def test_enabled_lanes_are_unioned() -> None:
     first = Lane.create("a", "A", 2, [Point2D(0, 0), Point2D(2, 0)])
     second = Lane.create("b", "B", 2, [Point2D(2, 0), Point2D(4, 0)])
     disabled = Lane.create("c", "C", 10, [Point2D(100, 0), Point2D(101, 0)])
