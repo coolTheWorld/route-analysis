@@ -74,6 +74,8 @@ def analyze_path(
                 start.yaw is None or end.yaw is None
                 for start, end in pairwise(points)
             ),
+            position_step=settings.position_step,
+            yaw_step=settings.yaw_step,
         )
 
     path_samples, skipped_segments = _sample_path(points, settings)
@@ -90,6 +92,8 @@ def analyze_path(
             status=ClearanceStatus.UNAVAILABLE,
             skipped_segments=skipped_segments,
             missing_yaw_indices=missing_yaw,
+            position_step=settings.position_step,
+            yaw_step=settings.yaw_step,
         )
 
     minimum = min(assessments, key=lambda item: item.clearance)
@@ -111,4 +115,6 @@ def analyze_path(
         skipped_segments=skipped_segments,
         missing_yaw_indices=missing_yaw,
         assessments=tuple(assessments),
+        position_step=settings.position_step,
+        yaw_step=settings.yaw_step,
     )

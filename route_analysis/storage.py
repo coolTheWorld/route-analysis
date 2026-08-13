@@ -97,7 +97,9 @@ class AppConfig:
     @property
     def first_run_complete(self) -> bool:
         return self.default_vehicle is not None and (
-            self.default_lane_width is not None and self.default_lane_width > 0
+            self.default_lane_width is not None
+            and math.isfinite(self.default_lane_width)
+            and self.default_lane_width > 0
         )
 
     def connection(self) -> ConnectionSettings:
@@ -179,7 +181,9 @@ class ConfigRepository:
         return AppConfig() if not self.path.exists() else AppConfig.from_dict(_read_json(self.path))
 
     def save(self, config: AppConfig) -> None:
-        if config.default_lane_width is not None and config.default_lane_width <= 0:
+        if config.default_lane_width is not None and (
+            not math.isfinite(config.default_lane_width) or config.default_lane_width <= 0
+        ):
             raise StorageError("默认车道宽度必须大于零")
         _atomic_json_write(self.path, config.to_dict(), backup=True)
 
@@ -336,6 +340,14 @@ class LaneLayout:
     def from_dict(cls, payload: Mapping[str, object]) -> LaneLayout:
         if payload.get("schemaVersion") != 1:
             raise DataContractError("不支持的车道文件版本")
+        units = payload.get("units")
+        valid_units = (
+            isinstance(units, Mapping)
+            and units.get("distance") == "m"
+            and units.get("angle") == "rad"
+        )
+        if not valid_units:
+            raise DataContractError("车道文件单位必须为米和弧度")
         raw_lanes = payload.get("lanes")
         if not isinstance(raw_lanes, list):
             raise DataContractError("车道文件 lanes 必须是数组")

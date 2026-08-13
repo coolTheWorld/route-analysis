@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from route_analysis.errors import StorageError
 from route_analysis.models import JoinStyle, Lane, Point2D, VehicleDimensions
 from route_analysis.storage import (
     AppConfig,
@@ -103,3 +104,26 @@ def test_import_is_previewed_and_replaces_instead_of_merging(tmp_path: Path) -> 
     assert loaded.server_id == "aaaaaaaaaaaaaaaa"
     assert loaded.map_id == "5"
     assert (tmp_path / "data" / "lanes" / "aaaaaaaaaaaaaaaa" / "5.json.bak").exists()
+
+
+def test_import_rejects_unknown_units(tmp_path: Path) -> None:
+    source = tmp_path / "feet.json"
+    source.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "serverId": "aaaaaaaaaaaaaaaa",
+                "mapId": "5",
+                "units": {"distance": "ft", "angle": "degree"},
+                "lanes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StorageError, match="导入文件内容无效"):
+        LaneRepository(tmp_path / "data").preview_import(
+            source,
+            expected_server_id="aaaaaaaaaaaaaaaa",
+            expected_map_id="5",
+        )
