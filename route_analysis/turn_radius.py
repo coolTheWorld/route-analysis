@@ -44,6 +44,7 @@ class RadiusObservation:
     rotation_center: Point2D
     side: TurnSide
     radii: Mapping[CornerRadiusKind, float]
+    corners: Mapping[CornerRadiusKind, Point2D]
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,7 +244,11 @@ def _world_corner(pose: PosePoint, longitudinal: float, lateral: float) -> Point
 
 def _corner_radii(
     pose: PosePoint, center: Point2D, dimensions: VehicleDimensions
-) -> tuple[TurnSide, dict[CornerRadiusKind, float]]:
+) -> tuple[
+    TurnSide,
+    dict[CornerRadiusKind, float],
+    dict[CornerRadiusKind, Point2D],
+]:
     if pose.yaw is None:
         raise ValueError("corner radius requires a pose with yaw")
     heading_x = math.cos(pose.yaw)
@@ -273,7 +278,7 @@ def _corner_radii(
         kind: math.hypot(corner.x - center.x, corner.y - center.y)
         for kind, corner in corners.items()
     }
-    return side, radii
+    return side, radii, corners
 
 
 def _statistics(
@@ -325,11 +330,13 @@ def analyze_turn_radii(
             if center is None or pose.yaw is None:
                 skipped += 1
                 continue
-            side, radii = _corner_radii(pose, center, dimensions)
+            side, radii, corners = _corner_radii(pose, center, dimensions)
             if not all(math.isfinite(value) for value in radii.values()):
                 skipped += 1
                 continue
-            observations.append(RadiusObservation(pose_index, pose, center, side, radii))
+            observations.append(
+                RadiusObservation(pose_index, pose, center, side, radii, corners)
+            )
         if not observations:
             continue
         side_counts = Counter(observation.side for observation in observations)

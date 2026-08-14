@@ -138,3 +138,36 @@ def test_generated_lane_preview_is_non_mutating_and_confirm_is_one_undo_step(
     assert canvas.undo_stack.count() == 1
     canvas.undo_stack.undo()
     assert [lane.name for lane in canvas.current_layout().lanes] == ["主车道"]
+
+
+def test_generated_arc_radius_edit_is_undoable(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    generated = generate_lane(
+        [
+            Point2D(-2, 0),
+            Point2D(-1, 0),
+            Point2D(-1 + math.sqrt(0.5), 1 - math.sqrt(0.5)),
+            Point2D(0, 1),
+            Point2D(0, 2),
+        ],
+        lane_id="arc-lane",
+        name="圆弧车道",
+        width=2,
+        mode=BendMode.ROUND,
+        maximum_deviation=0.08,
+    )
+    canvas.load_layout(LaneLayout("aaaaaaaaaaaaaaaa", "42", [generated.lane]))
+    arc_index = next(
+        index
+        for index, segment in enumerate(generated.lane.segments)
+        if segment.kind is SegmentKind.ARC
+    )
+
+    canvas.set_arc_radius("arc-lane", arc_index, 0.5)
+
+    edited = canvas.current_layout().lanes[0]
+    assert edited.segments[arc_index].arc_center is not None
+    canvas.undo_stack.undo()
+    restored = canvas.current_layout().lanes[0]
+    assert restored.anchors[arc_index].point == generated.lane.anchors[arc_index].point

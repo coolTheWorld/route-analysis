@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
@@ -59,6 +60,7 @@ from route_analysis.storage import (
     VehicleProfileRepository,
     server_id_for,
 )
+from route_analysis.turn_radius import TurnRadiusResult, analyze_turn_radii
 from route_analysis.workers import Worker
 
 LOGGER = logging.getLogger(__name__)
@@ -696,8 +698,14 @@ class MainWindow(QMainWindow):
         actual = self._actual_path
         self._analysis_generation += 1
         generation = self._analysis_generation
+        started = time.perf_counter()
 
-        def operation() -> tuple[AnalysisResult, AnalysisResult]:
+        def operation() -> tuple[
+            AnalysisResult,
+            AnalysisResult,
+            TurnRadiusResult,
+            TurnRadiusResult,
+        ]:
             area = build_traversable_area(
                 layout.lanes,
                 tolerance=settings.bezier_tolerance,
@@ -706,6 +714,18 @@ class MainWindow(QMainWindow):
             return (
                 analyze_path(dispatched, dimensions, area, settings),
                 analyze_path(actual, dimensions, area, settings),
+                analyze_turn_radii(
+                    dispatched,
+                    dimensions,
+                    threshold=settings.turn_threshold,
+                    distance_window=settings.radius_window,
+                ),
+                analyze_turn_radii(
+                    actual,
+                    dimensions,
+                    threshold=settings.turn_threshold,
+                    distance_window=settings.radius_window,
+                ),
             )
 
         worker: Worker[object] = Worker(operation)
@@ -714,11 +734,56 @@ class MainWindow(QMainWindow):
         def show(result: object) -> None:
             if generation != self._analysis_generation:
                 return
-            dispatched_result, actual_result = cast(
-                tuple[AnalysisResult, AnalysisResult], result
+            (
+                dispatched_result,
+                actual_result,
+                dispatched_radius,
+                actual_radius,
+            ) = cast(
+                tuple[
+                    AnalysisResult,
+                    AnalysisResult,
+                    TurnRadiusResult,
+                    TurnRadiusResult,
+                ],
+                result,
             )
             self.canvas.set_analysis_results(dispatched_result, actual_result)
             self.control_panel.set_results(dispatched_result, actual_result)
+            self.canvas.set_turn_radius_results(dispatched_radius, actual_radius)
+            dimensions_source = (
+                f"VIN {vin} 专属配置" if vin in self._profiles else "全局默认配置"
+            )
+            self.control_panel.set_turn_radius_results(
+                dispatched_radius,
+                actual_radius,
+                dimensions_source=dimensions_source,
+            )
+            log_event(
+                LOGGER,
+                logging.INFO,
+                "path_analysis_completed",
+                command_id=self._current_command.id if self._current_command else None,
+                map_id=self._lane_key[1] if self._lane_key else None,
+                vin=vin,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                dispatched_points=len(dispatched),
+                actual_points=len(actual),
+                dispatched_turns=len(dispatched_radius.turns),
+                actual_turns=len(actual_radius.turns),
+                dimensions_source=dimensions_source,
+            )
+            log_event(
+                LOGGER,
+                logging.DEBUG,
+                "path_analysis_full_result",
+                dispatched_path=dispatched,
+                actual_path=actual,
+                dispatched_clearance=dispatched_result,
+                actual_clearance=actual_result,
+                dispatched_radius=dispatched_radius,
+                actual_radius=actual_radius,
+            )
 
         worker.signals.succeeded.connect(show)
         worker.signals.failed.connect(self._show_error)

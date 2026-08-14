@@ -23,11 +23,12 @@ from PySide6.QtGui import (
     QUndoStack,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsScene, QGraphicsView
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from route_analysis.geometry import build_lane_area, lane_segment_points, vehicle_polygon
+from route_analysis.lane_generation import replace_arc_radius
 from route_analysis.models import (
     AnalysisResult,
     JoinStyle,
@@ -39,6 +40,11 @@ from route_analysis.models import (
     VehicleDimensions,
 )
 from route_analysis.storage import LaneLayout
+from route_analysis.turn_radius import (
+    CornerRadiusKind,
+    RadiusObservation,
+    TurnRadiusResult,
+)
 
 
 @dataclass(slots=True)
@@ -129,6 +135,12 @@ class RouteCanvas(QGraphicsView):
         self._drag_target: _DragTarget | None = None
         self._drag_before: LaneLayout | None = None
         self._lane_preview: Lane | None = None
+        self._turn_radius_results: dict[str, TurnRadiusResult | None] = {
+            "dispatched": None,
+            "actual": None,
+        }
+        self._turn_radius_layer = False
+        self._selected_radius: tuple[str, RadiusObservation] | None = None
 
         self.undo_stack = QUndoStack(self)
         self._rebuild_scene()
@@ -231,12 +243,16 @@ class RouteCanvas(QGraphicsView):
         self._paths = {"dispatched": tuple(dispatched), "actual": tuple(actual)}
         self._dimensions = dimensions
         self._results = {"dispatched": None, "actual": None}
+        self._turn_radius_results = {"dispatched": None, "actual": None}
+        self._selected_radius = None
         self._rebuild_scene()
         self.fit_content()
 
     def clear_paths(self) -> None:
         self._paths = {"dispatched": (), "actual": ()}
         self._results = {"dispatched": None, "actual": None}
+        self._turn_radius_results = {"dispatched": None, "actual": None}
+        self._selected_radius = None
         self._rebuild_scene()
         self.fit_content()
 
@@ -284,6 +300,32 @@ class RouteCanvas(QGraphicsView):
     ) -> None:
         self._results = {"dispatched": dispatched, "actual": actual}
         self._rebuild_scene()
+
+    def set_turn_radius_results(
+        self,
+        dispatched: TurnRadiusResult | None,
+        actual: TurnRadiusResult | None,
+    ) -> None:
+        self._turn_radius_results = {"dispatched": dispatched, "actual": actual}
+        self._selected_radius = None
+        self._rebuild_scene()
+
+    def set_turn_radius_layer(self, visible: bool) -> None:
+        self._turn_radius_layer = visible
+        self._rebuild_scene()
+
+    def show_turn_radius_observation(
+        self,
+        path_name: str,
+        observation: RadiusObservation,
+    ) -> None:
+        if path_name not in self._paths:
+            raise ValueError(f"unknown path: {path_name}")
+        self._selected_radius = (path_name, observation)
+        self._turn_radius_layer = True
+        self._rebuild_scene()
+        display = self.to_display(Point2D(observation.pose.x, observation.pose.y))
+        self.centerOn(display.x, display.y)
 
     def set_path_layer(
         self,
@@ -424,9 +466,22 @@ class RouteCanvas(QGraphicsView):
             if kind is SegmentKind.LINE:
                 segment.control1 = None
                 segment.control2 = None
+                segment.arc_center = None
+                segment.clockwise = None
                 return
             start = lane.anchors[index].point
             end = lane.anchors[(index + 1) % len(lane.anchors)].point
+            segment.arc_center = None
+            segment.clockwise = None
+            if kind is SegmentKind.ARC:
+                segment.control1 = None
+                segment.control2 = None
+                segment.arc_center = Point2D(
+                    (start.x + end.x) / 2,
+                    (start.y + end.y) / 2,
+                )
+                segment.clockwise = False
+                return
             segment.control1 = Point2D(
                 start.x + (end.x - start.x) / 3,
                 start.y + (end.y - start.y) / 3,
@@ -437,6 +492,15 @@ class RouteCanvas(QGraphicsView):
             )
 
         self._mutate("修改线段类型", operation)
+
+    def set_arc_radius(self, lane_id: str, segment_index: int, radius: float) -> None:
+        def operation(layout: LaneLayout) -> None:
+            lane = self._lane(layout, lane_id)
+            edited = replace_arc_radius(lane, segment_index, radius)
+            lane_position = layout.lanes.index(lane)
+            layout.lanes[lane_position] = edited
+
+        self._mutate("修改圆弧半径", operation)
 
     def set_control_point(
         self,
@@ -808,6 +872,92 @@ class RouteCanvas(QGraphicsView):
             self._cosmetic_pen(QColor("#00a884"), 2, Qt.PenStyle.DashLine),
         ).setZValue(40)
 
+    def _add_turn_radius_graphics(self) -> None:
+        if (
+            not self._turn_radius_layer
+            or self._selected_radius is None
+            or self._dimensions is None
+        ):
+            return
+        path_name, observation = self._selected_radius
+        color = self.PATH_COLORS[path_name]
+        vehicle = vehicle_polygon(observation.pose, self._dimensions)
+        fill = QColor(color)
+        fill.setAlpha(45)
+        self.scene().addPolygon(
+            self._display_polygon(vehicle.exterior.coords),
+            self._cosmetic_pen(color, 2),
+            QBrush(fill),
+        ).setZValue(60)
+
+        center = self.to_display(observation.rotation_center)
+        cross_size = 0.16
+        self.scene().addLine(
+            center.x - cross_size,
+            center.y,
+            center.x + cross_size,
+            center.y,
+            self._cosmetic_pen(QColor("#111827"), 2),
+        ).setZValue(70)
+        self.scene().addLine(
+            center.x,
+            center.y - cross_size,
+            center.x,
+            center.y + cross_size,
+            self._cosmetic_pen(QColor("#111827"), 2),
+        ).setZValue(70)
+
+        labels = {
+            CornerRadiusKind.FRONT_OUTER: "前外角",
+            CornerRadiusKind.REAR_OUTER: "后外角",
+            CornerRadiusKind.FRONT_INNER: "前内角",
+            CornerRadiusKind.REAR_INNER: "后内角",
+        }
+        colors = {
+            CornerRadiusKind.FRONT_OUTER: QColor("#b4233f"),
+            CornerRadiusKind.REAR_OUTER: QColor("#d86b1f"),
+            CornerRadiusKind.FRONT_INNER: QColor("#2474d8"),
+            CornerRadiusKind.REAR_INNER: QColor("#16794b"),
+        }
+        for kind in CornerRadiusKind:
+            corner = observation.corners[kind]
+            display_corner = self.to_display(corner)
+            radius_color = colors[kind]
+            self.scene().addLine(
+                center.x,
+                center.y,
+                display_corner.x,
+                display_corner.y,
+                self._cosmetic_pen(radius_color, 1.5),
+            ).setZValue(65)
+
+            radius = observation.radii[kind]
+            angle = math.atan2(
+                corner.y - observation.rotation_center.y,
+                corner.x - observation.rotation_center.x,
+            )
+            arc_path = QPainterPath()
+            for sample_index in range(17):
+                sample_angle = angle - 0.12 + 0.24 * sample_index / 16
+                raw = Point2D(
+                    observation.rotation_center.x + radius * math.cos(sample_angle),
+                    observation.rotation_center.y + radius * math.sin(sample_angle),
+                )
+                display = self.to_display(raw)
+                if sample_index == 0:
+                    arc_path.moveTo(display.x, display.y)
+                else:
+                    arc_path.lineTo(display.x, display.y)
+            self.scene().addPath(
+                arc_path,
+                self._cosmetic_pen(radius_color, 2),
+            ).setZValue(66)
+            text_item = self.scene().addText(f"{labels[kind]} {radius:.3f} m")
+            text_item.setDefaultTextColor(radius_color)
+            text_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+            text_item.setPos(display_corner.x, display_corner.y)
+            text_item.setZValue(80)
+
     def _rebuild_scene(self) -> None:
         self.scene().clear()
         for lane in self._layout.lanes:
@@ -816,5 +966,6 @@ class RouteCanvas(QGraphicsView):
             self._add_lane_graphics(self._lane_preview, preview=True)
         self._add_route_graphics("dispatched")
         self._add_route_graphics("actual")
+        self._add_turn_radius_graphics()
         if self._drawing:
             self._add_draft_graphics()
