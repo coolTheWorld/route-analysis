@@ -11,7 +11,7 @@ Authorization: Bearer <accessToken>
 tenant-id: <tenantId>
 ```
 
-访问令牌仅存在于进程内存，不写入配置、车道文件或日志。
+访问令牌不写入配置或车道文件；正常级别下仅存在于进程内存。按 [ADR 0004](adr/0004-record-sensitive-debug-logs.md)，启用 `DEBUG` 后会将令牌及完整请求/响应内容写入本地日志。
 
 ## 通用响应
 
