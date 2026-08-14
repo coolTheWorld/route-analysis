@@ -86,9 +86,13 @@ def _validate_positive(value: float, name: str) -> None:
 def _append_detected(
     turns: list[DetectedTurn], start: int, end: int, cumulative: float, threshold: float
 ) -> None:
-    comparison_tolerance = max(1e-12, threshold * 1e-12)
-    if end > start and abs(cumulative) - threshold > comparison_tolerance:
+    if end > start and _strictly_exceeds(abs(cumulative), threshold):
         turns.append(DetectedTurn(start, end, cumulative))
+
+
+def _strictly_exceeds(value: float, threshold: float) -> bool:
+    comparison_tolerance = max(1e-12, threshold * 1e-12)
+    return value - threshold > comparison_tolerance
 
 
 def _detect_valid_block(
@@ -341,7 +345,11 @@ def analyze_turn_radii(
             continue
         side_counts = Counter(observation.side for observation in observations)
         side = side_counts.most_common(1)[0][0]
-        kind = TurnKind.UTURN if abs(turn.cumulative_yaw) > 0.75 * math.pi else TurnKind.TURN
+        kind = (
+            TurnKind.UTURN
+            if _strictly_exceeds(abs(turn.cumulative_yaw), 0.75 * math.pi)
+            else TurnKind.TURN
+        )
         section = TurnRadiusSection(
             turn.start_index,
             turn.end_index,

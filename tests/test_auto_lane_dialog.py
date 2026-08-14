@@ -23,7 +23,7 @@ def test_dialog_defaults_to_dispatched_and_previews_generation(qtbot: QtBot) -> 
     previews: list[LaneGenerationResult | None] = []
     dialog.preview_changed.connect(previews.append)
 
-    dialog._regenerate()
+    dialog.refresh_preview()
 
     assert dialog.source_combo.currentData() == "dispatched"
     assert dialog.width_spin.value() == 2.5
@@ -52,7 +52,7 @@ def test_dialog_auto_checks_near_closed_path_but_user_controls_final_state(
 
     assert dialog.closed_check.isChecked() is True
     dialog.closed_check.setChecked(False)
-    dialog._regenerate()
+    dialog.refresh_preview()
     dialog.accept()
 
     assert dialog.generation_result is not None
@@ -74,7 +74,7 @@ def test_dialog_reports_invalid_source_without_modifying_any_layout(qtbot: QtBot
     previews: list[LaneGenerationResult | None] = []
     dialog.preview_changed.connect(previews.append)
 
-    dialog._regenerate()
+    dialog.refresh_preview()
 
     assert previews[-1] is None
     assert "至少" in dialog.metrics_label.text()

@@ -332,7 +332,7 @@ class MainWindow(QMainWindow):
             self.canvas.set_lane_preview(None if result is None else result.lane)
 
         dialog.preview_changed.connect(preview_changed)
-        dialog._regenerate()
+        dialog.refresh_preview()
         accepted = dialog.exec() == AutoLaneDialog.DialogCode.Accepted
         self.canvas.set_lane_preview(None)
         result = dialog.generation_result
