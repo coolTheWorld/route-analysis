@@ -8,12 +8,16 @@
 - [x] 单元、几何、存储、日志和 Qt 组件/主流程测试通过：88 项。
 - [x] Ruff 全项目检查通过。
 - [x] mypy 全项目检查通过。
-- [ ] 源码 `--smoke-test` 通过。
-- [ ] `pip-audit` 运行依赖与完整开发环境未发现已知漏洞。
-- [ ] PyInstaller Windows x64 文件夹构建通过，无新增阻断警告。
-- [ ] `dist/RouteAnalysis/RouteAnalysis.exe --smoke-test` 通过。
-- [ ] Qt 实际渲染截图完成目视检查。
-- [ ] 发布目录不包含 `data/`、`log/`、配置、密码、令牌或构建缓存。
+- [x] 源码 `--smoke-test` 通过。
+- [x] `pip-audit` 运行依赖与完整开发环境未发现已知漏洞。
+- [x] PyInstaller Windows x64 文件夹构建通过，无新增阻断警告。
+- [x] `dist/RouteAnalysis/RouteAnalysis.exe --smoke-test` 通过。
+- [x] Qt 实际渲染截图完成目视检查。
+- [x] 发布目录不包含 `data/`、`log/`、配置、密码、令牌或构建缓存。
+
+PyInstaller 的缺失模块报告仅包含 Windows 不适用的 POSIX 模块、NumPy 动态导出名称和依赖可选扩展；打包烟雾已真实导入 Qt、Requests、Shapely/GEOS 并执行几何与画布路径，因此不构成阻断。
+
+最终发布物：273 个文件，162,139,225 字节；`RouteAnalysis.exe` SHA-256 为 `12F460D0C60CCBFDED06873DB671F25C28EFC43636938959361C7FA996FB8966`。
 
 ## 五轴代码审查
 
@@ -75,3 +79,7 @@
 5. 0.2.0 新建且含真实圆弧的布局没有可逆 schema 1 表达；应保留该数据并继续使用 0.2.0，或人工重建为直线/贝塞尔后再回退。
 
 发布后首小时人工检查：应用启动、租户登录、订单分页、两类路径点数、自动车道预览、四角半径结果、保存/重启、INFO 日志流和“日志不可用”状态。若出现数据完整性问题、持续未捕获异常或关键流程不可用，立即回退程序目录并恢复车道备份。
+
+## 审查结论
+
+五轴审查未剩余 Critical 或 Required 问题；全部功能、性能、依赖、视觉、打包和回退门禁通过，批准发布 0.2.0。

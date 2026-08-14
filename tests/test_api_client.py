@@ -104,6 +104,7 @@ def test_debug_log_keeps_complete_credentials_headers_and_response(tmp_path: Pat
         record.get("headers", {}).get("Authorization") == "Bearer token-value"
         for record in records
     )
+    assert sum(record.get("event") == "http_response" for record in records) == 3
     assert any(
         isinstance(record.get("response"), dict)
         and isinstance(record["response"].get("data"), dict)
