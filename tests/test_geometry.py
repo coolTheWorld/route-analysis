@@ -6,6 +6,7 @@ from shapely.geometry import Point
 from route_analysis.geometry import (
     build_lane_area,
     build_traversable_area,
+    flatten_arc,
     flatten_cubic,
     interpolate_poses,
     shortest_angle_delta,
@@ -71,6 +72,42 @@ def test_flatten_cubic_preserves_endpoints_and_curve_side() -> None:
     assert points[0] == Point2D(0, 0)
     assert points[-1] == Point2D(2, 0)
     assert max(point.y for point in points) == pytest.approx(1.5, abs=0.03)
+
+
+def test_flatten_arc_preserves_endpoints_and_chord_tolerance() -> None:
+    points = flatten_arc(
+        Point2D(1, 0),
+        Point2D(0, 0),
+        Point2D(0, 1),
+        clockwise=False,
+        tolerance=0.01,
+    )
+
+    assert points[0] == Point2D(1, 0)
+    assert points[-1] == Point2D(0, 1)
+    assert max(math.hypot(point.x, point.y) for point in points) == pytest.approx(1)
+    assert any(point.x == pytest.approx(point.y, abs=0.02) for point in points[1:-1])
+
+
+def test_arc_lane_builds_area_around_true_circular_centerline() -> None:
+    lane = Lane(
+        id="arc",
+        name="Arc",
+        width=0.2,
+        anchors=[LaneAnchor(Point2D(1, 0)), LaneAnchor(Point2D(0, 1))],
+        segments=[
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=Point2D(0, 0),
+                clockwise=False,
+            )
+        ],
+    )
+
+    area = build_lane_area(lane, tolerance=0.005)
+
+    assert area.covers(Point(math.sqrt(0.5), math.sqrt(0.5)))
+    assert not area.covers(Point(0.5, 0.5))
 
 
 def test_open_lane_has_flat_caps_and_expected_total_width() -> None:

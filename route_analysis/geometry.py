@@ -130,12 +130,66 @@ def flatten_cubic(
     return points
 
 
+def flatten_arc(
+    start: Point2D,
+    center: Point2D,
+    end: Point2D,
+    *,
+    clockwise: bool,
+    tolerance: float = 0.02,
+) -> list[Point2D]:
+    """Flatten a circular arc with a maximum radial chord error."""
+
+    if tolerance <= 0:
+        raise ValueError("arc tolerance must be greater than zero")
+    start_radius = math.hypot(start.x - center.x, start.y - center.y)
+    end_radius = math.hypot(end.x - center.x, end.y - center.y)
+    if start_radius <= 0 or not math.isclose(
+        start_radius, end_radius, rel_tol=1e-7, abs_tol=1e-7
+    ):
+        raise ValueError("arc endpoints must share one positive radius")
+
+    start_angle = math.atan2(start.y - center.y, start.x - center.x)
+    end_angle = math.atan2(end.y - center.y, end.x - center.x)
+    if clockwise:
+        sweep = -((start_angle - end_angle) % math.tau)
+    else:
+        sweep = (end_angle - start_angle) % math.tau
+    if math.isclose(sweep, 0.0, abs_tol=1e-12):
+        raise ValueError("arc endpoints must not define a zero sweep")
+
+    ratio = min(1.0, tolerance / start_radius)
+    maximum_step = 2 * math.acos(max(-1.0, 1.0 - ratio))
+    steps = max(1, math.ceil(abs(sweep) / maximum_step))
+    points = [start]
+    for index in range(1, steps):
+        angle = start_angle + sweep * index / steps
+        points.append(
+            Point2D(
+                center.x + start_radius * math.cos(angle),
+                center.y + start_radius * math.sin(angle),
+            )
+        )
+    points.append(end)
+    return points
+
+
 def lane_segment_points(lane: Lane, index: int, *, tolerance: float = 0.02) -> list[Point2D]:
     start = lane.anchors[index].point
     end = lane.anchors[(index + 1) % len(lane.anchors)].point
     segment = lane.segments[index]
     if segment.kind is SegmentKind.LINE:
         return [start, end]
+    if segment.kind is SegmentKind.ARC:
+        if segment.arc_center is None or segment.clockwise is None:
+            raise ValueError("arc segment center and direction are required")
+        return flatten_arc(
+            start,
+            segment.arc_center,
+            end,
+            clockwise=segment.clockwise,
+            tolerance=tolerance,
+        )
     if segment.control1 is None or segment.control2 is None:
         raise ValueError("cubic segment control points are required")
     return flatten_cubic(start, segment.control1, segment.control2, end, tolerance=tolerance)

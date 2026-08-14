@@ -4,7 +4,15 @@ from pathlib import Path
 import pytest
 
 from route_analysis.errors import StorageError
-from route_analysis.models import JoinStyle, Lane, Point2D, VehicleDimensions
+from route_analysis.models import (
+    JoinStyle,
+    Lane,
+    LaneAnchor,
+    LaneSegment,
+    Point2D,
+    SegmentKind,
+    VehicleDimensions,
+)
 from route_analysis.storage import (
     AppConfig,
     ConfigRepository,
@@ -127,3 +135,50 @@ def test_import_rejects_unknown_units(tmp_path: Path) -> None:
             expected_server_id="aaaaaaaaaaaaaaaa",
             expected_map_id="5",
         )
+
+
+def test_lane_schema_two_round_trips_arcs_and_schema_one_remains_readable() -> None:
+    arc_lane = Lane(
+        id="arc",
+        name="Arc",
+        width=2,
+        anchors=[LaneAnchor(Point2D(1, 0)), LaneAnchor(Point2D(0, 1))],
+        segments=[
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=Point2D(0, 0),
+                clockwise=False,
+            )
+        ],
+    )
+    encoded = LaneLayout("aaaaaaaaaaaaaaaa", "5", [arc_lane]).to_dict()
+
+    decoded = LaneLayout.from_dict(encoded)
+
+    assert encoded["schemaVersion"] == 2
+    assert decoded.lanes[0].segments[0].arc_center == Point2D(0, 0)
+    assert decoded.lanes[0].segments[0].clockwise is False
+
+    schema_one = {
+        "schemaVersion": 1,
+        "serverId": "aaaaaaaaaaaaaaaa",
+        "mapId": "5",
+        "units": {"distance": "m", "angle": "rad"},
+        "lanes": [
+            {
+                "id": "legacy",
+                "name": "Legacy",
+                "width": 2,
+                "enabled": True,
+                "closed": False,
+                "defaultJoin": "miter",
+                "anchors": [{"x": 0, "y": 0}, {"x": 1, "y": 0}],
+                "segments": [{"kind": "line", "control1": None, "control2": None}],
+            }
+        ],
+    }
+
+    migrated = LaneLayout.from_dict(schema_one)
+
+    assert migrated.lanes[0].segments[0].kind is SegmentKind.LINE
+    assert migrated.to_dict()["schemaVersion"] == 2
