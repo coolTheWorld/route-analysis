@@ -1,8 +1,45 @@
+import pytest
+from PySide6.QtWidgets import QWidget
 from pytestqt.qtbot import QtBot
 
-from route_analysis.auto_lane_dialog import AutoLaneDialog
+from route_analysis.auto_lane_dialog import AutoLaneDialog, run_auto_lane_dialog
 from route_analysis.lane_generation import BendMode, LaneGenerationResult
 from route_analysis.models import PosePoint, SegmentKind
+
+
+def test_run_dialog_keeps_parameter_window_top_level(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    observed: dict[str, object] = {}
+
+    def inspect_dialog(dialog: AutoLaneDialog) -> AutoLaneDialog.DialogCode:
+        observed["is_window"] = dialog.isWindow()
+        observed["is_modal"] = dialog.isModal()
+        observed["parent"] = dialog.parent()
+        return AutoLaneDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(AutoLaneDialog, "exec", inspect_dialog)
+
+    selection = run_auto_lane_dialog(
+        parent,
+        {
+            "dispatched": (PosePoint(0, 0, None), PosePoint(1, 0, None)),
+            "actual": (),
+        },
+        default_width=2.5,
+        maximum_deviation=0.05,
+        last_mode=BendMode.SHARP,
+        preview_callback=lambda _result: None,
+    )
+
+    assert selection is None
+    assert observed == {
+        "is_window": True,
+        "is_modal": True,
+        "parent": parent,
+    }
 
 
 def test_dialog_defaults_to_dispatched_and_previews_generation(qtbot: QtBot) -> None:
