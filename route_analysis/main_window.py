@@ -789,7 +789,7 @@ class MainWindow(QMainWindow):
                 if state is None
                 else recalculate_measurements(state, self._path_for(path_name), dimensions)
             )
-        self.canvas.clear_turn_radius_observation()
+        self.canvas.set_vehicle_dimensions(dimensions)
         self.control_panel.set_turn_radius_measurements(
             self._calculated_radii["dispatched"],
             self._calculated_radii["actual"],

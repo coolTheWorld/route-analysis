@@ -1,7 +1,9 @@
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QGraphicsPolygonItem
 from pytestqt.qtbot import QtBot
 
 from route_analysis.api_client import (
@@ -15,6 +17,7 @@ from route_analysis.auto_lane_dialog import AutoLaneDialog
 from route_analysis.logging_setup import configure_logging
 from route_analysis.main_window import MainWindow
 from route_analysis.models import PosePoint, VehicleDimensions
+from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import AppConfig, ConfigRepository
 from route_analysis.turn_measurements import (
     MeasurementScope,
@@ -173,6 +176,77 @@ def test_failed_radius_persistence_restores_previous_state(
     restored = window._radius_states["dispatched"]
     assert restored is previous
     assert restored.records == ()
+
+
+def test_saving_changed_vehicle_dimensions_refreshes_canvas_vehicle_frames(
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_config(tmp_path)
+    client = FakeClient()
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: client,
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+    order = client.list_orders(page_no=1, page_size=20).items[0]
+    task = client.list_tasks(order_id=order.id, page_no=1, page_size=20).items[0]
+    command = client.list_commands(task_id=task.id)[0]
+    window._current_order = order
+    window._current_task = task
+    window._current_command = command
+    window._lane_key = (window._server_id(), "7")
+    path = tuple(
+        PosePoint(5 * math.cos(angle), 5 * math.sin(angle), angle + math.pi / 2)
+        for angle in (index * math.pi / 40 for index in range(21))
+    )
+    window._show_paths("VIN-1", (path, ()))
+    state = window._radius_states["dispatched"]
+    assert state is not None
+    state.add_manual(0, 20)
+    window._refresh_radius_measurements()
+    previous_measurement = window._calculated_radii["dispatched"][0]
+    previous_radius = previous_measurement.radius.radii
+    window.canvas.show_turn_radius_observation("dispatched", previous_measurement.radius)
+
+    def frame_dimensions(z_value: float) -> tuple[float, float]:
+        frame = next(
+            item
+            for item in window.canvas.scene().items()
+            if isinstance(item, QGraphicsPolygonItem) and item.zValue() == z_value
+        )
+        polygon = frame.polygon()
+        edge_lengths = sorted(
+            math.hypot(
+                polygon.at(index + 1).x() - polygon.at(index).x(),
+                polygon.at(index + 1).y() - polygon.at(index).y(),
+            )
+            for index in range(4)
+        )
+        return edge_lengths[0], edge_lengths[-1]
+
+    assert frame_dimensions(6) == pytest.approx((1, 2))
+    assert frame_dimensions(60) == pytest.approx((1, 2))
+    changed_dimensions = VehicleDimensions(width=4, center_front=5, center_rear=2)
+    changed_config = replace(window.config, default_vehicle=changed_dimensions)
+
+    def accept_settings(dialog: SettingsDialog) -> SettingsDialog.DialogCode:
+        dialog.result_config = changed_config
+        dialog.result_profiles = {}
+        return SettingsDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(SettingsDialog, "exec", accept_settings)
+
+    window.open_settings()
+
+    current_measurement = window._calculated_radii["dispatched"][0]
+    current_radius = current_measurement.radius.radii
+    window.canvas.show_turn_radius_observation("dispatched", current_measurement.radius)
+    assert current_radius != previous_radius
+    assert frame_dimensions(6) == pytest.approx((4, 7))
+    assert frame_dimensions(60) == pytest.approx((4, 7))
 
 
 def test_automatic_and_manual_radius_measurements_are_saved_locally(

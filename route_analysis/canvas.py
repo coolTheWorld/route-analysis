@@ -256,6 +256,11 @@ class RouteCanvas(QGraphicsView):
         self._rebuild_scene()
         self.fit_content()
 
+    def set_vehicle_dimensions(self, dimensions: VehicleDimensions) -> None:
+        self._dimensions = dimensions
+        self._selected_radius = None
+        self._rebuild_scene()
+
     def clear_paths(self) -> None:
         self._paths = {"dispatched": (), "actual": ()}
         self._results = {"dispatched": None, "actual": None}
