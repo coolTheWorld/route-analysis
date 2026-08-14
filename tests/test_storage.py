@@ -1,10 +1,12 @@
 import json
+import math
 from pathlib import Path
 
 import pytest
 
 from route_analysis.errors import StorageError
 from route_analysis.models import (
+    AnalysisSettings,
     JoinStyle,
     Lane,
     LaneAnchor,
@@ -32,6 +34,13 @@ def test_config_defaults_tenant_and_round_trips_plaintext_password(tmp_path: Pat
     config.password = "plain-secret"
     config.default_vehicle = VehicleDimensions(1.2, 0.8, 1.4)
     config.default_lane_width = 2.5
+    config.analysis = AnalysisSettings(
+        turn_threshold=0.6,
+        radius_window=0.8,
+        lane_generation_deviation=0.03,
+    )
+    config.lane_generation_mode = "bezier"
+    config.log_level = "DEBUG"
 
     repository.save(config)
     loaded = repository.load()
@@ -41,7 +50,22 @@ def test_config_defaults_tenant_and_round_trips_plaintext_password(tmp_path: Pat
     assert loaded.default_vehicle == VehicleDimensions(1.2, 0.8, 1.4)
     assert "plain-secret" in raw
     assert "accessToken" not in raw
+    assert loaded.analysis.turn_threshold == 0.6
+    assert loaded.analysis.radius_window == 0.8
+    assert loaded.analysis.lane_generation_deviation == 0.03
+    assert loaded.lane_generation_mode == "bezier"
+    assert loaded.log_level == "DEBUG"
     assert loaded.first_run_complete
+
+
+def test_old_config_gets_new_analysis_and_logging_defaults() -> None:
+    loaded = AppConfig.from_dict({"connection": {}, "analysis": {}})
+
+    assert loaded.analysis.turn_threshold == pytest.approx(math.pi / 6)
+    assert loaded.analysis.radius_window == 0.5
+    assert loaded.analysis.lane_generation_deviation == 0.05
+    assert loaded.lane_generation_mode == "sharp"
+    assert loaded.log_level == "INFO"
 
 
 def test_vehicle_profiles_use_vin_override_or_global_default(tmp_path: Path) -> None:

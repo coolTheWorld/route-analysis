@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
@@ -10,8 +12,11 @@ from urllib.parse import urlsplit, urlunsplit
 import requests
 
 from route_analysis.errors import ApiError, AuthenticationError, DataContractError
+from route_analysis.logging_setup import log_event
 from route_analysis.models import PosePoint
 from route_analysis.parsing import parse_command_path
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ResponseLike(Protocol):
@@ -135,18 +140,58 @@ class SchedulerClient:
         json_body: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> ResponseLike:
+        url = f"{self.api_root}{path}"
+        request_headers = dict(headers or {})
+        started = time.perf_counter()
+        log_event(
+            LOGGER,
+            logging.DEBUG,
+            "http_request",
+            method=method,
+            url=url,
+            params=params,
+            json_body=json_body,
+            headers=request_headers,
+            connection={
+                "api_root": self.settings.api_root,
+                "tenant": self.settings.tenant,
+                "username": self.settings.username,
+                "password": self.settings.password,
+                "timeout_seconds": self.settings.timeout_seconds,
+                "verify_tls": self.settings.verify_tls,
+            },
+        )
         try:
-            return self._session.request(
+            response = self._session.request(
                 method,
-                f"{self.api_root}{path}",
+                url,
                 params=params,
                 json=json_body,
-                headers=dict(headers or {}),
+                headers=request_headers,
                 timeout=self.settings.timeout_seconds,
                 verify=self.settings.verify_tls,
             )
         except requests.RequestException as exc:
+            log_event(
+                LOGGER,
+                logging.ERROR,
+                "http_request_failed",
+                exc_info=True,
+                method=method,
+                url=url,
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
             raise ApiError("无法连接调度后端，请检查地址、网络和证书设置") from exc
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "http_request_completed",
+            method=method,
+            path=path,
+            status_code=response.status_code,
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+        return response
 
     @staticmethod
     def _payload(response: ResponseLike) -> Mapping[str, object]:
@@ -156,6 +201,13 @@ class SchedulerClient:
             raise ApiError("调度后端返回了非 JSON 响应") from exc
         if not isinstance(payload, Mapping):
             raise ApiError("调度后端响应格式无效")
+        log_event(
+            LOGGER,
+            logging.DEBUG,
+            "http_response",
+            status_code=response.status_code,
+            response=payload,
+        )
         return payload
 
     @staticmethod

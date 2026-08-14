@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -8,6 +10,7 @@ import requests
 
 from route_analysis.api_client import ConnectionSettings, SchedulerClient
 from route_analysis.errors import AuthenticationError
+from route_analysis.logging_setup import configure_logging
 
 
 @dataclass
@@ -75,6 +78,38 @@ def test_order_query_logs_in_and_uses_exact_id_with_server_pagination() -> None:
         "Authorization": "Bearer token-value",
         "tenant-id": "7",
     }
+
+
+def test_debug_log_keeps_complete_credentials_headers_and_response(tmp_path: Path) -> None:
+    manager = configure_logging(tmp_path / "log", level="DEBUG")
+    session = FakeSession(
+        [
+            ok(7),
+            ok({"accessToken": "token-value"}),
+            ok({"list": [{"id": 929, "path": [[1, 2, 0.3]]}], "total": 1}),
+        ]
+    )
+
+    SchedulerClient(settings(), session=session).list_orders(page_no=1, page_size=20)
+    manager.close()
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "log" / "route-analysis.log")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(record.get("connection", {}).get("password") == "secret" for record in records)
+    assert any(
+        record.get("headers", {}).get("Authorization") == "Bearer token-value"
+        for record in records
+    )
+    assert any(
+        isinstance(record.get("response"), dict)
+        and isinstance(record["response"].get("data"), dict)
+        and record["response"]["data"].get("total") == 1
+        for record in records
+    )
 
 
 def test_client_uses_only_expected_read_endpoints_for_navigation_and_paths() -> None:
