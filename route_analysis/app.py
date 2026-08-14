@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         logging_manager.set_level(dialog.result_config.log_level)
 
-    window = MainWindow(data_dir)
+    window = MainWindow(data_dir, logging_manager=logging_manager)
     window.show()
     exit_code = app.exec()
     log_event(logger, logging.INFO, "application_stopped", exit_code=exit_code)

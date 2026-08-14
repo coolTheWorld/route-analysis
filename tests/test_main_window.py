@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from pytestqt.qtbot import QtBot
 
 from route_analysis.api_client import (
@@ -9,6 +10,7 @@ from route_analysis.api_client import (
     Page,
     TaskRecord,
 )
+from route_analysis.auto_lane_dialog import AutoLaneDialog
 from route_analysis.main_window import MainWindow
 from route_analysis.models import PosePoint, VehicleDimensions
 from route_analysis.storage import AppConfig, ConfigRepository
@@ -86,3 +88,29 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
     assert window.windowTitle().startswith("Suntae")
+
+
+def test_confirming_auto_lane_adds_once_and_persists_last_generation_mode(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_config(tmp_path)
+    window = MainWindow(tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False)
+    qtbot.addWidget(window)
+    window._dispatched_path = (
+        PosePoint(0, 0, None),
+        PosePoint(1, 0.01, None),
+        PosePoint(2, 0, None),
+    )
+    monkeypatch.setattr(
+        AutoLaneDialog,
+        "exec",
+        lambda _dialog: AutoLaneDialog.DialogCode.Accepted,
+    )
+
+    window.open_auto_lane_dialog()
+
+    assert len(window.canvas.current_layout().lanes) == 1
+    assert window.canvas.undo_stack.count() == 1
+    assert ConfigRepository(tmp_path).load().lane_generation_mode == "sharp"
+    window.canvas.undo_stack.undo()
+    assert window.canvas.current_layout().lanes == []
