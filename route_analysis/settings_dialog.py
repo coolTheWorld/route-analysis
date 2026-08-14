@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -182,6 +183,26 @@ class SettingsDialog(QDialog):
         self.clearance_spin = _spin(0, 100, settings.clearance_threshold, suffix=" m")
         self.bezier_tolerance_spin = _spin(0.001, 1, settings.bezier_tolerance, suffix=" m")
         self.miter_limit_spin = _spin(0.1, 100, settings.miter_limit, decimals=2)
+        self.turn_threshold_spin = _spin(
+            0.001, 10, settings.turn_threshold, decimals=6, suffix=" rad"
+        )
+        self.radius_window_spin = _spin(0.001, 100, settings.radius_window, suffix=" m")
+        self.generation_deviation_spin = _spin(
+            0.001, 10, settings.lane_generation_deviation, suffix=" m"
+        )
+        self.generation_mode_combo = QComboBox()
+        self.generation_mode_combo.addItem("尖角", "sharp")
+        self.generation_mode_combo.addItem("真实圆弧", "round")
+        self.generation_mode_combo.addItem("三次贝塞尔", "bezier")
+        self.generation_mode_combo.setCurrentIndex(
+            max(0, self.generation_mode_combo.findData(config.lane_generation_mode))
+        )
+        self.log_level_combo = QComboBox()
+        for level in ("DEBUG", "INFO", "WARNING", "ERROR"):
+            self.log_level_combo.addItem(level, level)
+        self.log_level_combo.setCurrentIndex(
+            max(0, self.log_level_combo.findData(config.log_level.upper()))
+        )
         explanation = QLabel(
             "连续扫掠按位置和 yaw 步长插值。步长越小越精细，但分析时间和样本数会增加。"
         )
@@ -192,6 +213,11 @@ class SettingsDialog(QDialog):
         form.addRow("净距警告阈值", self.clearance_spin)
         form.addRow("贝塞尔离散容差", self.bezier_tolerance_spin)
         form.addRow("尖角 miter 上限", self.miter_limit_spin)
+        form.addRow("转弯识别阈值", self.turn_threshold_spin)
+        form.addRow("半径距离窗口", self.radius_window_spin)
+        form.addRow("自动车道最大偏差", self.generation_deviation_spin)
+        form.addRow("默认弯道生成模式", self.generation_mode_combo)
+        form.addRow("日志级别", self.log_level_combo)
         return tab
 
     def add_profile(self, vin: str, dimensions: VehicleDimensions) -> None:
@@ -246,6 +272,9 @@ class SettingsDialog(QDialog):
                 clearance_threshold=self.clearance_spin.value(),
                 bezier_tolerance=self.bezier_tolerance_spin.value(),
                 miter_limit=self.miter_limit_spin.value(),
+                turn_threshold=self.turn_threshold_spin.value(),
+                radius_window=self.radius_window_spin.value(),
+                lane_generation_deviation=self.generation_deviation_spin.value(),
             )
             profiles = self._collect_profiles()
             config = AppConfig(
@@ -260,6 +289,8 @@ class SettingsDialog(QDialog):
                 map_direction=self.map_direction_spin.value(),
                 analysis=analysis,
                 snap_to_path=self.snap_check.isChecked(),
+                lane_generation_mode=str(self.generation_mode_combo.currentData()),
+                log_level=str(self.log_level_combo.currentData()),
             )
             if config.api_root:
                 config.connection().validated_root()

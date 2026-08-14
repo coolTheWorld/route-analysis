@@ -4,6 +4,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from route_analysis.canvas import RouteCanvas
+from route_analysis.lane_generation import BendMode, generate_lane
 from route_analysis.models import (
     JoinStyle,
     Lane,
@@ -107,3 +108,33 @@ def test_fit_content_keeps_y_up_and_brings_far_coordinates_into_view(qtbot: QtBo
     displayed = canvas.to_display(Point2D(1005, 2002.5))
     viewport_point = canvas.mapFromScene(displayed.x, displayed.y)
     assert canvas.viewport().rect().contains(viewport_point)
+
+
+def test_generated_lane_preview_is_non_mutating_and_confirm_is_one_undo_step(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    canvas.load_layout(layout())
+    generated = generate_lane(
+        [Point2D(0, 2), Point2D(1, 2.1), Point2D(2, 2)],
+        lane_id="generated",
+        name="自动车道",
+        width=2,
+        mode=BendMode.BEZIER,
+        maximum_deviation=0.05,
+    )
+    initial_items = len(canvas.scene().items())
+
+    canvas.set_lane_preview(generated.lane)
+
+    assert len(canvas.current_layout().lanes) == 1
+    assert canvas.undo_stack.count() == 0
+    assert len(canvas.scene().items()) > initial_items
+
+    canvas.add_generated_lane(generated.lane)
+
+    assert [lane.name for lane in canvas.current_layout().lanes] == ["主车道", "自动车道"]
+    assert canvas.undo_stack.count() == 1
+    canvas.undo_stack.undo()
+    assert [lane.name for lane in canvas.current_layout().lanes] == ["主车道"]

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsScene, QGraphicsView
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from route_analysis.geometry import build_lane_area, vehicle_polygon
+from route_analysis.geometry import build_lane_area, lane_segment_points, vehicle_polygon
 from route_analysis.models import (
     AnalysisResult,
     JoinStyle,
@@ -128,6 +128,7 @@ class RouteCanvas(QGraphicsView):
         self._draft_name = "新车道"
         self._drag_target: _DragTarget | None = None
         self._drag_before: LaneLayout | None = None
+        self._lane_preview: Lane | None = None
 
         self.undo_stack = QUndoStack(self)
         self._rebuild_scene()
@@ -156,6 +157,7 @@ class RouteCanvas(QGraphicsView):
 
     def load_layout(self, layout: LaneLayout) -> None:
         self._layout = copy.deepcopy(layout)
+        self._lane_preview = None
         self._selected_lane_id = layout.lanes[0].id if layout.lanes else None
         self._selected_anchor = 0 if layout.lanes else -1
         self._selected_segment = 0 if layout.lanes and layout.lanes[0].segments else -1
@@ -237,6 +239,28 @@ class RouteCanvas(QGraphicsView):
         self._results = {"dispatched": None, "actual": None}
         self._rebuild_scene()
         self.fit_content()
+
+    def set_lane_preview(self, lane: Lane | None) -> None:
+        """Show a non-persistent generated lane overlay without touching undo history."""
+
+        self._lane_preview = copy.deepcopy(lane)
+        self._rebuild_scene()
+
+    def add_generated_lane(self, lane: Lane) -> None:
+        """Append a complete generated lane as one undoable operation."""
+
+        generated = copy.deepcopy(lane)
+        self._lane_preview = None
+
+        def operation(layout: LaneLayout) -> None:
+            layout.lanes.append(copy.deepcopy(generated))
+
+        self._mutate("按路径生成车道", operation)
+        self._selected_lane_id = generated.id
+        self._selected_anchor = 0
+        self._selected_segment = 0
+        self._rebuild_scene()
+        self._emit_selection()
 
     def fit_content(self) -> None:
         """Fit rendered data into the viewport while preserving the Y-up metric scale."""
@@ -632,45 +656,45 @@ class RouteCanvas(QGraphicsView):
                 painter_path.addPolygon(self._display_polygon(interior.coords))
         return painter_path
 
-    def _add_lane_graphics(self, lane: Lane) -> None:
+    def _add_lane_graphics(self, lane: Lane, *, preview: bool = False) -> None:
         area = build_lane_area(
             lane,
             tolerance=self._bezier_tolerance,
             miter_limit=self._miter_limit,
         )
         area_item = QGraphicsPathItem(self._geometry_path(area))
-        area_color = QColor("#4f8dd8" if lane.enabled else "#aab3bf")
-        area_color.setAlpha(55 if lane.enabled else 30)
+        area_color = QColor("#00a884" if preview else ("#4f8dd8" if lane.enabled else "#aab3bf"))
+        area_color.setAlpha(34 if preview else (55 if lane.enabled else 30))
         area_item.setBrush(QBrush(area_color))
-        area_item.setPen(self._cosmetic_pen(QColor("#3972b6"), 1))
+        area_item.setPen(
+            self._cosmetic_pen(
+                QColor("#008f72" if preview else "#3972b6"),
+                1,
+                Qt.PenStyle.DashLine if preview else Qt.PenStyle.SolidLine,
+            )
+        )
         area_item.setZValue(-10)
         self.scene().addItem(area_item)
 
         center_path = QPainterPath()
         first = self.to_display(lane.anchors[0].point)
         center_path.moveTo(first.x, first.y)
-        for index, segment in enumerate(lane.segments):
-            end = self.to_display(lane.anchors[(index + 1) % len(lane.anchors)].point)
-            if segment.kind is SegmentKind.CUBIC and segment.control1 and segment.control2:
-                control1 = self.to_display(segment.control1)
-                control2 = self.to_display(segment.control2)
-                center_path.cubicTo(
-                    control1.x,
-                    control1.y,
-                    control2.x,
-                    control2.y,
-                    end.x,
-                    end.y,
-                )
-            else:
-                center_path.lineTo(end.x, end.y)
+        for index in range(len(lane.segments)):
+            points = lane_segment_points(lane, index, tolerance=self._bezier_tolerance)
+            for raw in points[1:]:
+                display = self.to_display(raw)
+                center_path.lineTo(display.x, display.y)
         center_item = self.scene().addPath(
             center_path,
-            self._cosmetic_pen(QColor("#225a9d"), 1.5, Qt.PenStyle.DashLine),
+            self._cosmetic_pen(
+                QColor("#007c64" if preview else "#225a9d"),
+                2 if preview else 1.5,
+                Qt.PenStyle.DashLine,
+            ),
         )
         center_item.setZValue(-5)
 
-        if lane.id != self._selected_lane_id:
+        if preview or lane.id != self._selected_lane_id:
             return
         handle_pen = self._cosmetic_pen(QColor("#14395f"), 1)
         for index, anchor in enumerate(lane.anchors):
@@ -788,6 +812,8 @@ class RouteCanvas(QGraphicsView):
         self.scene().clear()
         for lane in self._layout.lanes:
             self._add_lane_graphics(lane)
+        if self._lane_preview is not None:
+            self._add_lane_graphics(self._lane_preview, preview=True)
         self._add_route_graphics("dispatched")
         self._add_route_graphics("actual")
         if self._drawing:

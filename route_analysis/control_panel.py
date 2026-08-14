@@ -50,6 +50,7 @@ class ControlPanel(QScrollArea):
     export_requested = Signal()
     settings_requested = Signal()
     analyze_requested = Signal()
+    generate_lane_requested = Signal()
     direction_changed = Signal(float)
 
     def __init__(self, canvas: RouteCanvas) -> None:
@@ -172,6 +173,9 @@ class ControlPanel(QScrollArea):
         actions = QGridLayout()
         self.draw_button = QPushButton("绘制新车道")
         self.draw_button.clicked.connect(self._toggle_drawing)
+        generate_button = QPushButton("按路径生成")
+        generate_button.setAccessibleName("按下发或实际路径自动生成车道")
+        generate_button.clicked.connect(self.generate_lane_requested)
         delete_button = QPushButton("删除")
         delete_button.clicked.connect(self._delete_selected)
         undo_button = QPushButton("撤销")
@@ -185,10 +189,18 @@ class ControlPanel(QScrollArea):
         export_button = QPushButton("导出")
         export_button.clicked.connect(self.export_requested)
         for index, button in enumerate(
-            (self.draw_button, delete_button, undo_button, redo_button, save_button, import_button)
+            (
+                self.draw_button,
+                generate_button,
+                delete_button,
+                undo_button,
+                redo_button,
+                save_button,
+                import_button,
+                export_button,
+            )
         ):
             actions.addWidget(button, index // 2, index % 2)
-        actions.addWidget(export_button, 3, 0, 1, 2)
         layout.addLayout(actions)
 
         self.lane_list = QListWidget()
