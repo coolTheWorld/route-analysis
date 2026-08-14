@@ -18,11 +18,14 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QScrollArea,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from route_analysis.canvas import RouteCanvas
+from route_analysis.lane_generation import arc_radius, maximum_arc_radius
 from route_analysis.models import (
     AnalysisResult,
     ClearanceStatus,
@@ -31,6 +34,20 @@ from route_analysis.models import (
     Point2D,
     SegmentKind,
 )
+from route_analysis.turn_radius import (
+    CornerRadiusKind,
+    RadiusObservation,
+    TurnKind,
+    TurnRadiusResult,
+    TurnSide,
+)
+
+CORNER_LABELS = {
+    CornerRadiusKind.FRONT_OUTER: "前外角半径",
+    CornerRadiusKind.REAR_OUTER: "后外角半径",
+    CornerRadiusKind.FRONT_INNER: "前内角半径",
+    CornerRadiusKind.REAR_INNER: "后内角半径",
+}
 
 
 def _coordinate_spin() -> QDoubleSpinBox:
@@ -155,6 +172,11 @@ class ControlPanel(QScrollArea):
         self.direction_spin.valueChanged.connect(self.direction_changed)
         direction_row.addWidget(self.direction_spin)
         layout.addLayout(direction_row)
+        self.radius_layer_check = QCheckBox("显示转弯半径定位图层")
+        self.radius_layer_check.setChecked(False)
+        self.radius_layer_check.setAccessibleName("转弯半径画布图层")
+        self.radius_layer_check.toggled.connect(self.canvas.set_turn_radius_layer)
+        layout.addWidget(self.radius_layer_check)
         return group
 
     def _isolate(self, path_name: str | None) -> None:
@@ -259,6 +281,7 @@ class ControlPanel(QScrollArea):
         self.segment_combo.currentIndexChanged.connect(self._segment_selected)
         self.segment_kind_combo = QComboBox()
         self.segment_kind_combo.addItem("直线", SegmentKind.LINE)
+        self.segment_kind_combo.addItem("真实圆弧", SegmentKind.ARC)
         self.segment_kind_combo.addItem("三次贝塞尔", SegmentKind.CUBIC)
         self.segment_kind_combo.currentIndexChanged.connect(self._segment_kind_changed)
         segment_form.addRow("线段", self.segment_combo)
@@ -278,6 +301,11 @@ class ControlPanel(QScrollArea):
         c2.addWidget(self.control_spins[3])
         segment_form.addRow("控制点 1", c1)
         segment_form.addRow("控制点 2", c2)
+        self.arc_radius_spin = _coordinate_spin()
+        self.arc_radius_spin.setRange(0.0001, 1_000_000)
+        self.arc_radius_spin.setSuffix(" m")
+        self.arc_radius_spin.valueChanged.connect(self._arc_radius_changed)
+        segment_form.addRow("圆弧半径", self.arc_radius_spin)
         layout.addLayout(segment_form)
         return group
 
@@ -292,7 +320,127 @@ class ControlPanel(QScrollArea):
         analyze_button = QPushButton("立即重新分析")
         analyze_button.clicked.connect(self.analyze_requested)
         layout.addWidget(analyze_button)
+        radius_title = QLabel("四角转弯半径")
+        radius_title.setStyleSheet("font-weight:600;margin-top:6px")
+        layout.addWidget(radius_title)
+        self.dimension_source_label = QLabel("车辆尺寸来源：—")
+        self.dimension_source_label.setWordWrap(True)
+        layout.addWidget(self.dimension_source_label)
+        self.radius_summaries: dict[str, QLabel] = {}
+        self.radius_trees: dict[str, QTreeWidget] = {}
+        for path_name, title in (("dispatched", "下发路径"), ("actual", "实际路径")):
+            summary = QLabel(f"{title}：尚未计算")
+            summary.setWordWrap(True)
+            summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(summary)
+            tree = QTreeWidget()
+            tree.setColumnCount(4)
+            tree.setHeaderLabels(["弯道 / 半径", "最小值", "中位数", "最大值及位置"])
+            tree.setAccessibleName(f"{title}四角转弯半径明细")
+            tree.setMinimumHeight(105)
+            tree.setRootIsDecorated(True)
+            tree.itemActivated.connect(
+                lambda item, _column, path=path_name: self._radius_item_activated(path, item)
+            )
+            tree.itemClicked.connect(
+                lambda item, _column, path=path_name: self._radius_item_activated(path, item)
+            )
+            layout.addWidget(tree)
+            self.radius_summaries[path_name] = summary
+            self.radius_trees[path_name] = tree
         return group
+
+    def _radius_item_activated(self, path_name: str, item: QTreeWidgetItem) -> None:
+        observation = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(observation, RadiusObservation):
+            self.radius_layer_check.setChecked(True)
+            self.canvas.show_turn_radius_observation(path_name, observation)
+
+    @staticmethod
+    def _radius_location(observation: RadiusObservation) -> str:
+        return f"({observation.pose.x:.3f}, {observation.pose.y:.3f})"
+
+    def _populate_radius_tree(
+        self,
+        path_name: str,
+        title: str,
+        result: TurnRadiusResult | None,
+    ) -> None:
+        summary = self.radius_summaries[path_name]
+        tree = self.radius_trees[path_name]
+        tree.clear()
+        if result is None:
+            summary.setText(f"{title}：尚未计算")
+            return
+        if not result.turns:
+            incomplete = (
+                f"；缺 yaw {len(result.missing_yaw_indices)} 点"
+                if result.incomplete
+                else ""
+            )
+            summary.setText(f"{title}：未识别到转弯{incomplete}")
+            return
+        overall_parts = []
+        for kind in CornerRadiusKind:
+            stats = result.overall[kind]
+            overall_parts.append(
+                f"{CORNER_LABELS[kind]} {stats.maximum:.3f} m @ "
+                f"{self._radius_location(stats.maximum_observation)}"
+            )
+        summary.setText(
+            f"{title}全局最大：" + "；".join(overall_parts)
+            + f"；无有效旋转中心跳过 {result.skipped_icr_samples} 个"
+            + (f"；缺 yaw {len(result.missing_yaw_indices)} 点" if result.incomplete else "")
+        )
+        for index, turn in enumerate(result.turns, start=1):
+            side = "车体左侧" if turn.side is TurnSide.LEFT else "车体右侧"
+            category = "掉头" if turn.kind is TurnKind.UTURN else "转弯"
+            maximums = "；".join(
+                f"{CORNER_LABELS[kind]} {turn.statistics[kind].maximum:.3f} m @ "
+                f"{self._radius_location(turn.statistics[kind].maximum_observation)}"
+                for kind in CornerRadiusKind
+            )
+            parent = QTreeWidgetItem(
+                [
+                    f"弯道 {index}：{side}{category}（点 {turn.start_index}–{turn.end_index}）",
+                    "",
+                    "",
+                    maximums,
+                ]
+            )
+            parent.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                turn.statistics[CornerRadiusKind.FRONT_OUTER].maximum_observation,
+            )
+            tree.addTopLevelItem(parent)
+            for kind in CornerRadiusKind:
+                stats = turn.statistics[kind]
+                child = QTreeWidgetItem(
+                    [
+                        CORNER_LABELS[kind],
+                        f"{stats.minimum:.3f} m",
+                        f"{stats.median:.3f} m",
+                        f"{stats.maximum:.3f} m @ "
+                        f"{self._radius_location(stats.maximum_observation)}",
+                    ]
+                )
+                child.setData(0, Qt.ItemDataRole.UserRole, stats.maximum_observation)
+                parent.addChild(child)
+            parent.setExpanded(False)
+        for column in range(4):
+            tree.resizeColumnToContents(column)
+
+    def set_turn_radius_results(
+        self,
+        dispatched: TurnRadiusResult | None,
+        actual: TurnRadiusResult | None,
+        *,
+        dimensions_source: str,
+    ) -> None:
+        self.dimension_source_label.setText(f"车辆尺寸来源：{dimensions_source}")
+        self._populate_radius_tree("dispatched", "下发路径", dispatched)
+        self._populate_radius_tree("actual", "实际路径", actual)
 
     def set_configuration(self, *, default_lane_width: float, direction: float) -> None:
         self.default_lane_width = default_lane_width
@@ -409,6 +557,21 @@ class ControlPanel(QScrollArea):
         cubic = segment.kind is SegmentKind.CUBIC
         for spin in self.control_spins:
             spin.setEnabled(cubic)
+        self.arc_radius_spin.setEnabled(False)
+        self.arc_radius_spin.setToolTip("")
+        if segment.kind is SegmentKind.ARC:
+            try:
+                radius = arc_radius(lane, index)
+                maximum = maximum_arc_radius(lane, index)
+            except ValueError as exc:
+                self.arc_radius_spin.setToolTip(str(exc))
+            else:
+                self.arc_radius_spin.blockSignals(True)
+                self.arc_radius_spin.setMaximum(maximum)
+                self.arc_radius_spin.setValue(radius)
+                self.arc_radius_spin.blockSignals(False)
+                self.arc_radius_spin.setEnabled(True)
+                self.arc_radius_spin.setToolTip(f"最大允许半径 {maximum:.4f} m")
         if cubic and segment.control1 and segment.control2:
             for spin, value in zip(
                 self.control_spins,
@@ -516,6 +679,15 @@ class ControlPanel(QScrollArea):
             segment_index,
             2,
             Point2D(self.control_spins[2].value(), self.control_spins[3].value()),
+        )
+
+    def _arc_radius_changed(self, radius: float) -> None:
+        if self._updating or not self.canvas.selected_lane_id:
+            return
+        self.canvas.set_arc_radius(
+            self.canvas.selected_lane_id,
+            self.segment_combo.currentIndex(),
+            radius,
         )
 
     @staticmethod

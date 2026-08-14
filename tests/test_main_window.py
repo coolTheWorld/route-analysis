@@ -85,6 +85,9 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
     window.activate_selected()
 
     qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
+    qtbot.waitUntil(
+        lambda: "未识别到转弯" in window.control_panel.radius_summaries["dispatched"].text()
+    )
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
     assert window.windowTitle().startswith("Suntae")
