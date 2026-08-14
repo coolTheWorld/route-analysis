@@ -98,7 +98,7 @@ class AutoLaneDialog(QDialog):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(100)
-        self._timer.timeout.connect(self._regenerate)
+        self._timer.timeout.connect(self.refresh_preview)
         self.source_combo.currentIndexChanged.connect(self._source_changed)
         for signal in (
             self.name_edit.textChanged,
@@ -110,7 +110,7 @@ class AutoLaneDialog(QDialog):
             signal.connect(self._schedule_preview)
 
         self._auto_set_closed()
-        self._regenerate()
+        self.refresh_preview()
 
     def _source_points(self) -> tuple[PosePoint, ...]:
         return self._paths.get(str(self.source_combo.currentData()), ())
@@ -135,7 +135,7 @@ class AutoLaneDialog(QDialog):
     def _schedule_preview(self, *_args: object) -> None:
         self._timer.start()
 
-    def _regenerate(self) -> None:
+    def refresh_preview(self) -> None:
         self._timer.stop()
         try:
             result = generate_lane(
@@ -172,7 +172,7 @@ class AutoLaneDialog(QDialog):
         self.preview_changed.emit(result)
 
     def accept(self) -> None:
-        self._regenerate()
+        self.refresh_preview()
         if self.generation_result is not None:
             super().accept()
 

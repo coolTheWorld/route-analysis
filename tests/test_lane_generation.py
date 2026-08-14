@@ -1,4 +1,5 @@
 import math
+import time
 
 import pytest
 from shapely.geometry import LineString, Point
@@ -240,3 +241,50 @@ def test_arc_radius_edit_preserves_tangent_lines_and_rejects_oversize() -> None:
 
     with pytest.raises(ValueError, match="maximum radius is 2"):
         replace_arc_radius(generated.lane, arc_index, 2.01)
+
+
+def test_dense_round_path_is_simplified_before_arc_window_search() -> None:
+    sample_count = 600
+    source = [Point2D(-2, 0)]
+    source.extend(
+        Point2D(
+            math.cos(-math.pi / 2 + math.pi * index / (sample_count - 1)),
+            1 + math.sin(-math.pi / 2 + math.pi * index / (sample_count - 1)),
+        )
+        for index in range(sample_count)
+    )
+    source.append(Point2D(-1, 2))
+    started = time.perf_counter()
+
+    result = generate_lane(
+        source,
+        lane_id="dense",
+        name="Dense",
+        width=2,
+        mode=BendMode.ROUND,
+        maximum_deviation=0.01,
+    )
+
+    assert time.perf_counter() - started < 1.5
+    assert any(segment.kind is SegmentKind.ARC for segment in result.lane.segments)
+    assert result.metrics.maximum_deviation <= 0.01
+
+
+def test_dense_jagged_round_source_has_bounded_arc_search_time() -> None:
+    source = [
+        Point2D(index * 0.01, 0.02 if index % 2 else -0.02)
+        for index in range(1200)
+    ]
+    started = time.perf_counter()
+
+    result = generate_lane(
+        source,
+        lane_id="jagged",
+        name="Jagged",
+        width=2,
+        mode=BendMode.ROUND,
+        maximum_deviation=0.005,
+    )
+
+    assert time.perf_counter() - started < 1.5
+    assert result.metrics.maximum_deviation <= 0.005

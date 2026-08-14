@@ -104,3 +104,27 @@ def test_logging_failure_is_non_blocking_and_next_event_retries(tmp_path: Path) 
     assert any(state.available is False for state in states)
     assert any(state.available is True for state in states)
     assert "recovered" in blocking_directory.read_text(encoding="utf-8")
+
+
+def test_first_event_after_idle_midnight_uses_new_active_date_without_empty_history(
+    tmp_path: Path,
+) -> None:
+    current = [datetime(2026, 8, 14, 23, 59)]
+    handler = HybridRotatingFileHandler(
+        tmp_path / "route-analysis.log",
+        clock=lambda: current[0],
+    )
+    handler.setFormatter(JsonEventFormatter())
+    logger = logging.getLogger("idle-midnight-test")
+    logger.handlers = [handler]
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    current[0] += timedelta(days=1)
+
+    log_event(logger, logging.INFO, "first_event_next_day")
+    handler.close()
+
+    assert list(tmp_path.glob("route-analysis.*.log")) == []
+    assert "first_event_next_day" in (tmp_path / "route-analysis.log").read_text(
+        encoding="utf-8"
+    )

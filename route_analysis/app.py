@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Sequence
+from types import TracebackType
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -64,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     def log_unhandled(
         exception_type: type[BaseException],
         exception: BaseException,
-        traceback: object,
+        traceback: TracebackType | None,
     ) -> None:
         log_event(
             logger,
@@ -72,7 +73,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "main_thread_unhandled_exception",
             exc_info=(exception_type, exception, traceback),
         )
-        previous_excepthook(exception_type, exception, traceback)  # type: ignore[arg-type]
+        previous_excepthook(exception_type, exception, traceback)
 
     sys.excepthook = log_unhandled
     config_repository = ConfigRepository(data_dir)

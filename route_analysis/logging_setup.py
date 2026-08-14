@@ -123,7 +123,12 @@ class HybridRotatingFileHandler(logging.handlers.BaseRotatingHandler):
 
     def shouldRollover(self, record: logging.LogRecord) -> bool:
         if self.clock().date() != self._active_date:
-            return self.path.exists() and self.path.is_file() and self.path.stat().st_size > 0
+            has_content = (
+                self.path.exists() and self.path.is_file() and self.path.stat().st_size > 0
+            )
+            if not has_content:
+                self._active_date = self.clock().date()
+            return has_content
         if not self.path.exists() or not self.path.is_file():
             return False
         formatted = self.format(record) + self.terminator

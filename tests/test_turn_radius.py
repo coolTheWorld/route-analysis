@@ -182,3 +182,15 @@ def test_uturn_and_zero_rotation_samples_are_classified_and_skipped() -> None:
     assert result.turns[0].kind is TurnKind.UTURN
     assert abs(result.turns[0].cumulative_yaw) > 0.75 * math.pi
     assert result.skipped_icr_samples >= 1
+
+
+def test_exact_uturn_threshold_remains_a_normal_turn() -> None:
+    exact = _arc_poses(5, 0, 0.75 * math.pi, 31)
+    above = _arc_poses(5, 0, 0.75 * math.pi + 1e-5, 31)
+    dimensions = VehicleDimensions(width=2, center_front=3, center_rear=1)
+
+    exact_result = analyze_turn_radii(exact, dimensions)
+    above_result = analyze_turn_radii(above, dimensions)
+
+    assert exact_result.turns[0].kind is TurnKind.TURN
+    assert above_result.turns[0].kind is TurnKind.UTURN
