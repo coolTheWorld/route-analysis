@@ -4,7 +4,14 @@ import pytest
 from shapely.geometry import LineString, Point
 
 from route_analysis.geometry import lane_segment_points
-from route_analysis.lane_generation import BendMode, LaneGenerationResult, generate_lane
+from route_analysis.lane_generation import (
+    BendMode,
+    LaneGenerationResult,
+    arc_radius,
+    generate_lane,
+    maximum_arc_radius,
+    replace_arc_radius,
+)
 from route_analysis.models import Point2D, PosePoint, SegmentKind
 
 
@@ -159,3 +166,44 @@ def test_generation_rejects_fewer_than_two_unique_points() -> None:
             mode=BendMode.SHARP,
             maximum_deviation=0.05,
         )
+
+
+def test_arc_radius_edit_preserves_tangent_lines_and_rejects_oversize() -> None:
+    source = [Point2D(-2, 0), Point2D(-1, 0)]
+    source.extend(
+        Point2D(-1 + math.cos(angle), 1 + math.sin(angle))
+        for angle in [-math.pi / 2, -math.pi / 4, 0]
+    )
+    source.append(Point2D(0, 2))
+    generated = generate_lane(
+        source,
+        lane_id="editable",
+        name="Editable",
+        width=2,
+        mode=BendMode.ROUND,
+        maximum_deviation=0.08,
+    )
+    arc_index = next(
+        index
+        for index, segment in enumerate(generated.lane.segments)
+        if segment.kind is SegmentKind.ARC
+    )
+
+    assert arc_radius(generated.lane, arc_index) == pytest.approx(1)
+    assert maximum_arc_radius(generated.lane, arc_index) == pytest.approx(2)
+
+    edited = replace_arc_radius(generated.lane, arc_index, 0.5)
+
+    assert arc_radius(edited, arc_index) == pytest.approx(0.5)
+    assert edited.anchors[arc_index].point.x == pytest.approx(-0.5)
+    assert edited.anchors[arc_index].point.y == pytest.approx(0)
+    assert edited.anchors[arc_index + 1].point.x == pytest.approx(0)
+    assert edited.anchors[arc_index + 1].point.y == pytest.approx(0.5)
+    center = edited.segments[arc_index].arc_center
+    assert center is not None
+    assert center.x == pytest.approx(-0.5)
+    assert center.y == pytest.approx(0.5)
+    assert arc_radius(generated.lane, arc_index) == pytest.approx(1)
+
+    with pytest.raises(ValueError, match="maximum radius is 2"):
+        replace_arc_radius(generated.lane, arc_index, 2.01)

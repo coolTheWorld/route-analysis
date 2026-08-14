@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -43,6 +44,128 @@ class LaneGenerationMetrics:
 class LaneGenerationResult:
     lane: Lane
     metrics: LaneGenerationMetrics
+
+
+def arc_radius(lane: Lane, segment_index: int) -> float:
+    """Return the radius of one validated circular lane segment."""
+
+    segment = lane.segments[segment_index]
+    if segment.kind is not SegmentKind.ARC or segment.arc_center is None:
+        raise ValueError("selected segment is not a circular arc")
+    start = lane.anchors[segment_index].point
+    return math.hypot(start.x - segment.arc_center.x, start.y - segment.arc_center.y)
+
+
+def _cross(first: tuple[float, float], second: tuple[float, float]) -> float:
+    return first[0] * second[1] - first[1] * second[0]
+
+
+def _line_intersection(
+    first_point: Point2D,
+    first_direction: tuple[float, float],
+    second_point: Point2D,
+    second_direction: tuple[float, float],
+) -> Point2D | None:
+    denominator = _cross(first_direction, second_direction)
+    if abs(denominator) <= 1e-10:
+        return None
+    offset = (second_point.x - first_point.x, second_point.y - first_point.y)
+    distance = _cross(offset, second_direction) / denominator
+    return Point2D(
+        first_point.x + first_direction[0] * distance,
+        first_point.y + first_direction[1] * distance,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _FilletGeometry:
+    vertex: Point2D
+    incoming: tuple[float, float]
+    outgoing: tuple[float, float]
+    tangent_factor: float
+    maximum_radius: float
+    turn_sign: float
+
+
+def _fillet_geometry(lane: Lane, segment_index: int) -> _FilletGeometry:
+    if lane.segments[segment_index].kind is not SegmentKind.ARC:
+        raise ValueError("selected segment is not a circular arc")
+    segment_count = len(lane.segments)
+    previous_index = (segment_index - 1) % segment_count
+    next_index = (segment_index + 1) % segment_count
+    if not lane.closed and (segment_index == 0 or segment_index == segment_count - 1):
+        raise ValueError("an editable arc requires an adjacent straight segment on both sides")
+    if (
+        lane.segments[previous_index].kind is not SegmentKind.LINE
+        or lane.segments[next_index].kind is not SegmentKind.LINE
+    ):
+        raise ValueError("an editable arc requires an adjacent straight segment on both sides")
+
+    anchor_count = len(lane.anchors)
+    previous_anchor = lane.anchors[(segment_index - 1) % anchor_count].point
+    arc_start = lane.anchors[segment_index].point
+    arc_end = lane.anchors[(segment_index + 1) % anchor_count].point
+    next_anchor = lane.anchors[(segment_index + 2) % anchor_count].point
+    incoming = _unit(arc_start.x - previous_anchor.x, arc_start.y - previous_anchor.y)
+    outgoing = _unit(next_anchor.x - arc_end.x, next_anchor.y - arc_end.y)
+    if incoming is None or outgoing is None:
+        raise ValueError("adjacent straight segments must have positive length")
+    vertex = _line_intersection(arc_start, incoming, arc_end, outgoing)
+    if vertex is None:
+        raise ValueError("adjacent straight segments do not define a bend")
+
+    dot = max(-1.0, min(1.0, incoming[0] * outgoing[0] + incoming[1] * outgoing[1]))
+    deflection = math.acos(dot)
+    tangent_factor = math.tan(deflection / 2)
+    turn_sign = _cross(incoming, outgoing)
+    if tangent_factor <= 1e-10 or abs(turn_sign) <= 1e-10:
+        raise ValueError("adjacent straight segments do not define a bend")
+    previous_capacity = math.hypot(vertex.x - previous_anchor.x, vertex.y - previous_anchor.y)
+    next_capacity = math.hypot(next_anchor.x - vertex.x, next_anchor.y - vertex.y)
+    maximum = min(previous_capacity, next_capacity) / tangent_factor
+    if maximum <= 0:
+        raise ValueError("adjacent straight segments do not have room for an arc")
+    return _FilletGeometry(vertex, incoming, outgoing, tangent_factor, maximum, turn_sign)
+
+
+def maximum_arc_radius(lane: Lane, segment_index: int) -> float:
+    """Return the largest tangent radius allowed by adjacent straight segments."""
+
+    return _fillet_geometry(lane, segment_index).maximum_radius
+
+
+def replace_arc_radius(lane: Lane, segment_index: int, radius: float) -> Lane:
+    """Return a copy with a tangent arc resized around its theoretical vertex."""
+
+    if not math.isfinite(radius) or radius <= 0:
+        raise ValueError("arc radius must be finite and greater than zero")
+    geometry = _fillet_geometry(lane, segment_index)
+    if radius > geometry.maximum_radius + 1e-9:
+        maximum = f"{geometry.maximum_radius:.6f}".rstrip("0").rstrip(".")
+        raise ValueError(f"arc radius is too large; maximum radius is {maximum}")
+
+    tangent_distance = radius * geometry.tangent_factor
+    start = Point2D(
+        geometry.vertex.x - geometry.incoming[0] * tangent_distance,
+        geometry.vertex.y - geometry.incoming[1] * tangent_distance,
+    )
+    end = Point2D(
+        geometry.vertex.x + geometry.outgoing[0] * tangent_distance,
+        geometry.vertex.y + geometry.outgoing[1] * tangent_distance,
+    )
+    normal_sign = 1.0 if geometry.turn_sign > 0 else -1.0
+    center = Point2D(
+        start.x - geometry.incoming[1] * normal_sign * radius,
+        start.y + geometry.incoming[0] * normal_sign * radius,
+    )
+
+    edited = deepcopy(lane)
+    edited.anchors[segment_index].point = start
+    edited.anchors[(segment_index + 1) % len(edited.anchors)].point = end
+    segment = edited.segments[segment_index]
+    segment.arc_center = center
+    segment.clockwise = geometry.turn_sign < 0
+    return edited
 
 
 @dataclass(frozen=True, slots=True)
