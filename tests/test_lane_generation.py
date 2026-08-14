@@ -156,6 +156,39 @@ def test_closed_generation_removes_repeated_endpoint_and_closes_lane() -> None:
     assert all(generated.distance(Point(point.x, point.y)) <= 0.01 for point in source)
 
 
+def test_closed_round_generation_fits_cyclic_arc_windows() -> None:
+    source = [
+        Point2D(1, 0),
+        Point2D(3, 0),
+        Point2D(3 + math.sqrt(0.5), 1 - math.sqrt(0.5)),
+        Point2D(4, 1),
+        Point2D(4, 3),
+        Point2D(3 + math.sqrt(0.5), 3 + math.sqrt(0.5)),
+        Point2D(3, 4),
+        Point2D(1, 4),
+        Point2D(1 - math.sqrt(0.5), 3 + math.sqrt(0.5)),
+        Point2D(0, 3),
+        Point2D(0, 1),
+        Point2D(1 - math.sqrt(0.5), 1 - math.sqrt(0.5)),
+        Point2D(1, 0),
+    ]
+
+    result = generate_lane(
+        source,
+        lane_id="rounded-loop",
+        name="Rounded loop",
+        width=1,
+        mode=BendMode.ROUND,
+        maximum_deviation=0.05,
+        closed=True,
+    )
+
+    assert result.lane.closed is True
+    assert sum(segment.kind is SegmentKind.ARC for segment in result.lane.segments) == 4
+    assert result.metrics.arc_failures == 0
+    assert result.metrics.maximum_deviation <= 0.05
+
+
 def test_generation_rejects_fewer_than_two_unique_points() -> None:
     with pytest.raises(ValueError, match="at least two unique"):
         generate_lane(

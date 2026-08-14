@@ -68,6 +68,17 @@ def test_old_config_gets_new_analysis_and_logging_defaults() -> None:
     assert loaded.log_level == "INFO"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("lane_generation_mode", "circle-ish"), ("log_level", "TRACE")),
+)
+def test_config_rejects_unknown_generation_mode_or_log_level(
+    field: str, value: str
+) -> None:
+    with pytest.raises(StorageError, match="无效数值"):
+        AppConfig.from_dict({"connection": {}, "analysis": {}, field: value})
+
+
 def test_vehicle_profiles_use_vin_override_or_global_default(tmp_path: Path) -> None:
     repository = VehicleProfileRepository(tmp_path)
     default = VehicleDimensions(1, 1, 1)

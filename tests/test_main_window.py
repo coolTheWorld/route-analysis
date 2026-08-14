@@ -11,6 +11,7 @@ from route_analysis.api_client import (
     TaskRecord,
 )
 from route_analysis.auto_lane_dialog import AutoLaneDialog
+from route_analysis.logging_setup import configure_logging
 from route_analysis.main_window import MainWindow
 from route_analysis.models import PosePoint, VehicleDimensions
 from route_analysis.storage import AppConfig, ConfigRepository
@@ -117,3 +118,25 @@ def test_confirming_auto_lane_adds_once_and_persists_last_generation_mode(
     assert ConfigRepository(tmp_path).load().lane_generation_mode == "sharp"
     window.canvas.undo_stack.undo()
     assert window.canvas.current_layout().lanes == []
+
+
+def test_logging_failure_status_is_persistent_and_recovers(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    make_config(tmp_path / "data")
+    manager = configure_logging(tmp_path / "log")
+    window = MainWindow(
+        tmp_path / "data",
+        client_factory=lambda _settings: FakeClient(),
+        auto_load=False,
+        logging_manager=manager,
+    )
+    qtbot.addWidget(window)
+
+    manager.handler._publish_state(False, "disk unavailable")
+    qtbot.waitUntil(lambda: window.log_status_label.text() == "日志不可用")
+    assert "disk unavailable" in window.log_status_label.toolTip()
+
+    manager.handler._publish_state(True)
+    qtbot.waitUntil(lambda: window.log_status_label.text() == "")
+    manager.close()

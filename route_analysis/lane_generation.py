@@ -378,6 +378,118 @@ def _round_lane(
     return Lane(lane_id, name, width, anchors, segments, default_join=JoinStyle.MITER), 0
 
 
+def _find_closed_arc_fits(points: Sequence[Point2D], tolerance: float) -> list[_ArcFit]:
+    count = len(points)
+    extended = list(points) * 3
+    candidates: list[_ArcFit] = []
+    for start in range(count, count * 2):
+        maximum_end = min(start + count - 1, len(extended) - 2)
+        for end in range(start + 2, maximum_end + 1):
+            candidate = _fit_arc_candidate(extended, start, end, tolerance)
+            if candidate is not None:
+                candidates.append(candidate)
+    candidates.sort(key=lambda fit: (-fit.sample_count, fit.maximum_deviation, fit.start_index))
+    selected: list[_ArcFit] = []
+    occupied: set[int] = set()
+    for candidate in candidates:
+        sample_indices = {
+            index % count for index in range(candidate.start_index, candidate.end_index + 1)
+        }
+        if occupied.isdisjoint(sample_indices):
+            selected.append(candidate)
+            occupied.update(sample_indices)
+    return selected
+
+
+def _round_closed_lane(
+    points: Sequence[Point2D], lane_id: str, name: str, width: float, tolerance: float
+) -> tuple[Lane, int]:
+    fits = _find_closed_arc_fits(points, tolerance)
+    if not fits:
+        return (
+            Lane.create(
+                lane_id,
+                name,
+                width,
+                list(points),
+                closed=True,
+                default_join=JoinStyle.MITER,
+            ),
+            len(points),
+        )
+
+    count = len(points)
+    cut: int | None = None
+    relative_fits: list[_ArcFit] = []
+    for candidate_cut in range(count):
+        converted: list[_ArcFit] = []
+        valid = True
+        for fit in fits:
+            start_modulo = fit.start_index % count
+            relative_start = (start_modulo - candidate_cut) % count
+            relative_end = relative_start + fit.sample_count - 1
+            if relative_end > count:
+                valid = False
+                break
+            converted.append(
+                _ArcFit(
+                    relative_start,
+                    relative_end,
+                    fit.center,
+                    fit.clockwise,
+                    fit.maximum_deviation,
+                )
+            )
+        if valid:
+            cut = candidate_cut
+            relative_fits = sorted(converted, key=lambda fit: fit.start_index)
+            break
+    if cut is None:
+        return (
+            Lane.create(lane_id, name, width, list(points), closed=True),
+            len(points),
+        )
+
+    linear = [points[(cut + offset) % count] for offset in range(count)]
+    linear.append(linear[0])
+    anchors = [LaneAnchor(linear[0])]
+    segments: list[LaneSegment] = []
+    cursor = 0
+    for fit in relative_fits:
+        line_points = _simplify_open(linear[cursor : fit.start_index + 1], tolerance)
+        for point in line_points[1:]:
+            _append_line(anchors, segments, point)
+        if not _same_point(anchors[-1].point, linear[fit.start_index]):
+            _append_line(anchors, segments, linear[fit.start_index])
+        anchors.append(LaneAnchor(linear[fit.end_index]))
+        segments.append(
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=fit.center,
+                clockwise=fit.clockwise,
+            )
+        )
+        cursor = fit.end_index
+    tail = _simplify_open(linear[cursor:], tolerance)
+    for point in tail[1:]:
+        _append_line(anchors, segments, point)
+    if not _same_point(anchors[-1].point, anchors[0].point):
+        _append_line(anchors, segments, anchors[0].point)
+    anchors.pop()
+    return (
+        Lane(
+            lane_id,
+            name,
+            width,
+            anchors,
+            segments,
+            closed=True,
+            default_join=JoinStyle.MITER,
+        ),
+        0,
+    )
+
+
 def _tangent(points: Sequence[Point2D], index: int, closed: bool) -> tuple[float, float]:
     if closed:
         previous = points[(index - 1) % len(points)]
@@ -472,17 +584,13 @@ def generate_lane(
         )
     elif mode is BendMode.ROUND:
         if closed:
-            # Closed circular fitting needs cyclic source windows. Until a bend
-            # has enough samples on both sides, retain its exact sharp geometry.
-            lane = Lane.create(
+            lane, arc_failures = _round_closed_lane(
+                points,
                 lane_id,
                 name,
                 width,
-                list(points),
-                closed=True,
-                default_join=JoinStyle.MITER,
+                maximum_deviation,
             )
-            arc_failures = len(points)
         else:
             lane, arc_failures = _round_lane(
                 points, lane_id, name, width, maximum_deviation
