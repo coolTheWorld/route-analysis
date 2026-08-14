@@ -9,7 +9,11 @@ from route_analysis.geometry import (
     flatten_arc,
     flatten_cubic,
     interpolate_poses,
+    lane_centerline_bounds,
+    lane_centerline_length,
+    scale_lane_to_length,
     shortest_angle_delta,
+    translate_lane,
     vehicle_polygon,
 )
 from route_analysis.models import (
@@ -184,3 +188,106 @@ def test_enabled_lanes_are_unioned() -> None:
 
     assert union.covers(Point(3.5, 0.9))
     assert not union.covers(Point(100, 0))
+
+
+def test_lane_length_uses_exact_line_arc_and_closed_segments() -> None:
+    lane = Lane(
+        id="mixed",
+        name="Mixed",
+        width=2,
+        anchors=[
+            LaneAnchor(Point2D(0, 0)),
+            LaneAnchor(Point2D(2, 0)),
+            LaneAnchor(Point2D(2, 2)),
+        ],
+        segments=[
+            LaneSegment(SegmentKind.LINE),
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=Point2D(2, 1),
+                clockwise=False,
+            ),
+        ],
+    )
+    square = Lane.create(
+        "square",
+        "Square",
+        2,
+        [Point2D(0, 0), Point2D(1, 0), Point2D(1, 1), Point2D(0, 1)],
+        closed=True,
+    )
+
+    assert lane_centerline_length(lane) == pytest.approx(2 + math.pi)
+    assert lane_centerline_length(square) == pytest.approx(4)
+
+
+def test_cubic_bounds_use_curve_extrema_and_scaling_keeps_that_center() -> None:
+    lane = Lane(
+        id="cubic",
+        name="Cubic",
+        width=2,
+        anchors=[LaneAnchor(Point2D(0, 0)), LaneAnchor(Point2D(2, 0))],
+        segments=[
+            LaneSegment(
+                SegmentKind.CUBIC,
+                control1=Point2D(0, 2),
+                control2=Point2D(2, 2),
+            )
+        ],
+    )
+    original_length = lane_centerline_length(lane)
+    bounds = lane_centerline_bounds(lane)
+
+    assert bounds == pytest.approx((0, 0, 2, 1.5))
+    scaled = scale_lane_to_length(lane, original_length * 2)
+
+    assert lane_centerline_length(scaled) == pytest.approx(original_length * 2)
+    assert lane_centerline_bounds(scaled) == pytest.approx((-1, -0.75, 3, 2.25))
+    assert scaled.width == lane.width
+
+
+def test_lane_translation_moves_every_geometry_point_and_zero_length_cannot_scale() -> None:
+    lane = Lane(
+        id="arc",
+        name="Arc",
+        width=2,
+        anchors=[LaneAnchor(Point2D(0, 0)), LaneAnchor(Point2D(2, 0))],
+        segments=[
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=Point2D(1, 0),
+                clockwise=False,
+            )
+        ],
+    )
+    moved = translate_lane(lane, 3, -2)
+    assert [anchor.point for anchor in moved.anchors] == [Point2D(3, -2), Point2D(5, -2)]
+    assert moved.segments[0].arc_center == Point2D(4, -2)
+
+    zero = Lane.create("zero", "Zero", 2, [Point2D(1, 1), Point2D(1, 1)])
+    assert lane_centerline_length(zero) == 0
+    with pytest.raises(ValueError, match="零长度"):
+        scale_lane_to_length(zero, 1)
+
+
+def test_scaling_moves_arc_center_and_preserves_clockwise_arc_bounds() -> None:
+    lane = Lane(
+        id="clockwise",
+        name="Clockwise",
+        width=2,
+        anchors=[LaneAnchor(Point2D(1, 0)), LaneAnchor(Point2D(0, -1))],
+        segments=[
+            LaneSegment(
+                SegmentKind.ARC,
+                arc_center=Point2D(0, 0),
+                clockwise=True,
+            )
+        ],
+    )
+
+    assert lane_centerline_bounds(lane) == pytest.approx((0, -1, 1, 0))
+    scaled = scale_lane_to_length(lane, math.pi)
+    assert lane_centerline_length(scaled) == pytest.approx(math.pi)
+    arc_center = scaled.segments[0].arc_center
+    assert arc_center is not None
+    assert (arc_center.x, arc_center.y) == pytest.approx((-0.5, 0.5))

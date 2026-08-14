@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTreeWidget,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from route_analysis.canvas import RouteCanvas
+from route_analysis.geometry import lane_centerline_length
 from route_analysis.lane_generation import arc_radius, maximum_arc_radius
 from route_analysis.models import (
     AnalysisResult,
@@ -34,13 +36,8 @@ from route_analysis.models import (
     Point2D,
     SegmentKind,
 )
-from route_analysis.turn_radius import (
-    CornerRadiusKind,
-    RadiusObservation,
-    TurnKind,
-    TurnRadiusResult,
-    TurnSide,
-)
+from route_analysis.turn_measurements import CalculatedMeasurement, MeasurementSource
+from route_analysis.turn_radius import CornerRadiusKind, TurnKind, TurnSide
 
 CORNER_LABELS = {
     CornerRadiusKind.FRONT_OUTER: "前外角半径",
@@ -69,6 +66,10 @@ class ControlPanel(QScrollArea):
     analyze_requested = Signal()
     generate_lane_requested = Signal()
     direction_changed = Signal(float)
+    auto_radius_requested = Signal(str)
+    manual_radius_requested = Signal(str)
+    radius_delete_requested = Signal(str, str)
+    radius_rename_requested = Signal(str, str, str)
 
     def __init__(self, canvas: RouteCanvas) -> None:
         super().__init__()
@@ -235,10 +236,14 @@ class ControlPanel(QScrollArea):
         properties = QFormLayout()
         self.name_edit = QLineEdit()
         self.name_edit.editingFinished.connect(self._name_changed)
+        self.length_spin = _coordinate_spin()
+        self.length_spin.setRange(0, 1_000_000)
+        self.length_spin.setSuffix(" m")
+        self.length_spin.editingFinished.connect(self._length_changed)
         self.width_spin = _coordinate_spin()
-        self.width_spin.setRange(0.001, 1000)
+        self.width_spin.setRange(0, 1000)
         self.width_spin.setSuffix(" m")
-        self.width_spin.valueChanged.connect(self._width_changed)
+        self.width_spin.editingFinished.connect(self._width_changed)
         self.enabled_check = QCheckBox("参与可通行区域并集")
         self.enabled_check.toggled.connect(self._enabled_changed)
         self.closed_check = QCheckBox("闭合环")
@@ -248,6 +253,7 @@ class ControlPanel(QScrollArea):
         self.default_join_combo.addItem("圆角", JoinStyle.ROUND)
         self.default_join_combo.currentIndexChanged.connect(self._default_join_changed)
         properties.addRow("名称", self.name_edit)
+        properties.addRow("中心线长度", self.length_spin)
         properties.addRow("总宽", self.width_spin)
         properties.addRow("状态", self.enabled_check)
         properties.addRow("形状", self.closed_check)
@@ -320,7 +326,7 @@ class ControlPanel(QScrollArea):
         analyze_button = QPushButton("立即重新分析")
         analyze_button.clicked.connect(self.analyze_requested)
         layout.addWidget(analyze_button)
-        radius_title = QLabel("四角转弯半径")
+        radius_title = QLabel("整弯转弯半径")
         radius_title.setStyleSheet("font-weight:600;margin-top:6px")
         layout.addWidget(radius_title)
         self.dimension_source_label = QLabel("车辆尺寸来源：—")
@@ -328,16 +334,43 @@ class ControlPanel(QScrollArea):
         layout.addWidget(self.dimension_source_label)
         self.radius_summaries: dict[str, QLabel] = {}
         self.radius_trees: dict[str, QTreeWidget] = {}
+        self.radius_auto_buttons: dict[str, QPushButton] = {}
+        self.radius_manual_buttons: dict[str, QPushButton] = {}
+        self.radius_delete_buttons: dict[str, QPushButton] = {}
+        self._radius_tree_updating = False
         for path_name, title in (("dispatched", "下发路径"), ("actual", "实际路径")):
-            summary = QLabel(f"{title}：尚未计算")
+            path_title = QLabel(title)
+            path_title.setStyleSheet("font-weight:600;margin-top:4px")
+            layout.addWidget(path_title)
+            actions = QHBoxLayout()
+            auto_button = QPushButton("自动计算半径")
+            manual_button = QPushButton("手动计算半径")
+            delete_button = QPushButton("删除选中")
+            auto_button.clicked.connect(
+                lambda _checked=False, path=path_name: self.auto_radius_requested.emit(path)
+            )
+            manual_button.clicked.connect(
+                lambda _checked=False, path=path_name: self.manual_radius_requested.emit(path)
+            )
+            delete_button.clicked.connect(
+                lambda _checked=False, path=path_name: self._delete_radius_measurement(path)
+            )
+            actions.addWidget(auto_button)
+            actions.addWidget(manual_button)
+            actions.addWidget(delete_button)
+            layout.addLayout(actions)
+            self.radius_auto_buttons[path_name] = auto_button
+            self.radius_manual_buttons[path_name] = manual_button
+            self.radius_delete_buttons[path_name] = delete_button
+            summary = QLabel(f"{title}：自动 0，手动 0")
             summary.setWordWrap(True)
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(summary)
             tree = QTreeWidget()
-            tree.setColumnCount(4)
-            tree.setHeaderLabels(["弯道 / 半径", "最小值", "中位数", "最大值及位置"])
-            tree.setAccessibleName(f"{title}四角转弯半径明细")
-            tree.setMinimumHeight(105)
+            tree.setColumnCount(3)
+            tree.setHeaderLabels(["测量 / 半径", "端点 / 数值", "状态 / 转向"])
+            tree.setAccessibleName(f"{title}整弯转弯半径测量")
+            tree.setMinimumHeight(145)
             tree.setRootIsDecorated(True)
             tree.itemActivated.connect(
                 lambda item, _column, path=path_name: self._radius_item_activated(path, item)
@@ -345,102 +378,160 @@ class ControlPanel(QScrollArea):
             tree.itemClicked.connect(
                 lambda item, _column, path=path_name: self._radius_item_activated(path, item)
             )
+            tree.itemChanged.connect(
+                lambda item, column, path=path_name: self._radius_item_changed(
+                    path, item, column
+                )
+            )
             layout.addWidget(tree)
             self.radius_summaries[path_name] = summary
             self.radius_trees[path_name] = tree
         return group
 
     def _radius_item_activated(self, path_name: str, item: QTreeWidgetItem) -> None:
-        observation = item.data(0, Qt.ItemDataRole.UserRole)
-        if isinstance(observation, RadiusObservation):
+        measurement = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(measurement, CalculatedMeasurement) and measurement.radius.valid:
             self.radius_layer_check.setChecked(True)
-            self.canvas.show_turn_radius_observation(path_name, observation)
+            self.canvas.show_turn_radius_observation(path_name, measurement.radius)
 
-    @staticmethod
-    def _radius_location(observation: RadiusObservation) -> str:
-        return f"({observation.pose.x:.3f}, {observation.pose.y:.3f})"
-
-    def _populate_radius_tree(
+    def _radius_item_changed(
         self,
         path_name: str,
-        title: str,
-        result: TurnRadiusResult | None,
+        item: QTreeWidgetItem,
+        column: int,
     ) -> None:
-        summary = self.radius_summaries[path_name]
-        tree = self.radius_trees[path_name]
-        tree.clear()
-        if result is None:
-            summary.setText(f"{title}：尚未计算")
+        if self._radius_tree_updating or column != 0:
             return
-        if not result.turns:
-            incomplete = (
-                f"；缺 yaw {len(result.missing_yaw_indices)} 点"
-                if result.incomplete
-                else ""
-            )
-            summary.setText(f"{title}：未识别到转弯{incomplete}")
+        measurement = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(measurement, CalculatedMeasurement):
             return
-        overall_parts = []
-        for kind in CornerRadiusKind:
-            stats = result.overall[kind]
-            overall_parts.append(
-                f"{CORNER_LABELS[kind]} {stats.maximum:.3f} m @ "
-                f"{self._radius_location(stats.maximum_observation)}"
-            )
-        summary.setText(
-            f"{title}全局最大：" + "；".join(overall_parts)
-            + f"；无有效旋转中心跳过 {result.skipped_icr_samples} 个"
-            + (f"；缺 yaw {len(result.missing_yaw_indices)} 点" if result.incomplete else "")
-        )
-        for index, turn in enumerate(result.turns, start=1):
-            side = "车体左侧" if turn.side is TurnSide.LEFT else "车体右侧"
-            category = "掉头" if turn.kind is TurnKind.UTURN else "转弯"
-            maximums = "；".join(
-                f"{CORNER_LABELS[kind]} {turn.statistics[kind].maximum:.3f} m @ "
-                f"{self._radius_location(turn.statistics[kind].maximum_observation)}"
-                for kind in CornerRadiusKind
-            )
-            parent = QTreeWidgetItem(
-                [
-                    f"弯道 {index}：{side}{category}（点 {turn.start_index}–{turn.end_index}）",
-                    "",
-                    "",
-                    maximums,
-                ]
-            )
-            parent.setData(
-                0,
-                Qt.ItemDataRole.UserRole,
-                turn.statistics[CornerRadiusKind.FRONT_OUTER].maximum_observation,
-            )
-            tree.addTopLevelItem(parent)
-            for kind in CornerRadiusKind:
-                stats = turn.statistics[kind]
-                child = QTreeWidgetItem(
-                    [
-                        CORNER_LABELS[kind],
-                        f"{stats.minimum:.3f} m",
-                        f"{stats.median:.3f} m",
-                        f"{stats.maximum:.3f} m @ "
-                        f"{self._radius_location(stats.maximum_observation)}",
-                    ]
-                )
-                child.setData(0, Qt.ItemDataRole.UserRole, stats.maximum_observation)
-                parent.addChild(child)
-            parent.setExpanded(False)
-        for column in range(4):
-            tree.resizeColumnToContents(column)
+        name = item.text(0).strip()
+        old_name = str(item.data(0, Qt.ItemDataRole.UserRole + 1))
+        if not name or name == old_name:
+            if not name:
+                self._radius_tree_updating = True
+                item.setText(0, old_name)
+                self._radius_tree_updating = False
+            return
+        self.radius_rename_requested.emit(path_name, measurement.record.id, name)
 
-    def set_turn_radius_results(
+    def _delete_radius_measurement(self, path_name: str) -> None:
+        item = self.radius_trees[path_name].currentItem()
+        if item is None:
+            return
+        measurement = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(measurement, CalculatedMeasurement):
+            self.radius_delete_requested.emit(path_name, measurement.record.id)
+
+    @staticmethod
+    def _measurement_status(measurement: CalculatedMeasurement) -> str:
+        radius = measurement.radius
+        if not radius.valid:
+            return f"无法计算：{radius.error or '未知原因'}"
+        side = "车体左侧" if radius.side is TurnSide.LEFT else "车体右侧"
+        category = "掉头" if radius.kind is TurnKind.UTURN else "转弯"
+        return f"{side}{category}"
+
+    def _add_measurement_item(
         self,
-        dispatched: TurnRadiusResult | None,
-        actual: TurnRadiusResult | None,
+        parent: QTreeWidgetItem,
+        measurement: CalculatedMeasurement,
+    ) -> None:
+        record = measurement.record
+        item = QTreeWidgetItem(
+            [
+                record.name,
+                f"点 {record.start_index} → {record.end_index}",
+                self._measurement_status(measurement),
+            ]
+        )
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        item.setData(0, Qt.ItemDataRole.UserRole, measurement)
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, record.name)
+        parent.addChild(item)
+        radius = measurement.radius
+        if not radius.valid or radius.front_axle_radius is None:
+            detail = QTreeWidgetItem(["原因", radius.error or "未知原因", ""])
+            detail.setData(0, Qt.ItemDataRole.UserRole, measurement)
+            item.addChild(detail)
+            return
+        values: list[tuple[str, float]] = [
+            ("前轴中心转弯半径", radius.front_axle_radius),
+            *[(CORNER_LABELS[kind], radius.radii[kind]) for kind in CornerRadiusKind],
+        ]
+        for label, value in values:
+            detail = QTreeWidgetItem([label, f"{value:.3f} m", ""])
+            detail.setData(0, Qt.ItemDataRole.UserRole, measurement)
+            item.addChild(detail)
+
+    def _populate_measurements(
+        self,
+        path_name: str,
+        measurements: tuple[CalculatedMeasurement, ...],
+    ) -> None:
+        tree = self.radius_trees[path_name]
+        automatic = tuple(
+            item
+            for item in measurements
+            if item.record.source is MeasurementSource.AUTOMATIC
+        )
+        manual = tuple(
+            item for item in measurements if item.record.source is MeasurementSource.MANUAL
+        )
+        self._radius_tree_updating = True
+        tree.blockSignals(True)
+        try:
+            tree.clear()
+            for label, group_measurements in (
+                ("自动测量", automatic),
+                ("手动测量", manual),
+            ):
+                group = QTreeWidgetItem([label, f"{len(group_measurements)} 条", ""])
+                tree.addTopLevelItem(group)
+                for measurement in group_measurements:
+                    self._add_measurement_item(group, measurement)
+                group.setExpanded(True)
+            self.radius_summaries[path_name].setText(
+                f"自动 {len(automatic)}，手动 {len(manual)}"
+            )
+            for column in range(3):
+                tree.resizeColumnToContents(column)
+        finally:
+            tree.blockSignals(False)
+            self._radius_tree_updating = False
+
+    def set_turn_radius_measurements(
+        self,
+        dispatched: tuple[CalculatedMeasurement, ...],
+        actual: tuple[CalculatedMeasurement, ...],
         *,
         dimensions_source: str,
     ) -> None:
         self.dimension_source_label.setText(f"车辆尺寸来源：{dimensions_source}")
-        self._populate_radius_tree("dispatched", "下发路径", dispatched)
-        self._populate_radius_tree("actual", "实际路径", actual)
+        self._populate_measurements("dispatched", dispatched)
+        self._populate_measurements("actual", actual)
+
+    def set_manual_radius_mode(self, path_name: str, active: bool) -> None:
+        self.radius_manual_buttons[path_name].setText(
+            "结束手动计算" if active else "手动计算半径"
+        )
+
+    def select_radius_measurement(self, path_name: str, measurement_id: str) -> None:
+        tree = self.radius_trees[path_name]
+        for group_index in range(tree.topLevelItemCount()):
+            group = tree.topLevelItem(group_index)
+            if group is None:
+                continue
+            for measurement_index in range(group.childCount()):
+                item = group.child(measurement_index)
+                measurement = item.data(0, Qt.ItemDataRole.UserRole)
+                if (
+                    isinstance(measurement, CalculatedMeasurement)
+                    and measurement.record.id == measurement_id
+                ):
+                    tree.setCurrentItem(item)
+                    group.setExpanded(True)
+                    return
 
     def set_configuration(self, *, default_lane_width: float, direction: float) -> None:
         self.default_lane_width = default_lane_width
@@ -508,6 +599,7 @@ class ControlPanel(QScrollArea):
             enabled = lane is not None
             for widget in (
                 self.name_edit,
+                self.length_spin,
                 self.width_spin,
                 self.enabled_check,
                 self.closed_check,
@@ -518,10 +610,17 @@ class ControlPanel(QScrollArea):
                 widget.setEnabled(enabled)
             if lane is None:
                 self.name_edit.clear()
+                self.length_spin.setValue(0)
                 self.anchor_combo.clear()
                 self.segment_combo.clear()
                 return
             self.name_edit.setText(lane.name)
+            length = lane_centerline_length(lane)
+            self.length_spin.setValue(length)
+            self.length_spin.setEnabled(length > 1e-12)
+            self.length_spin.setToolTip(
+                "" if length > 1e-12 else "零长度车道无法按比例缩放"
+            )
             self.width_spin.setValue(lane.width)
             self.enabled_check.setChecked(lane.enabled)
             self.closed_check.setChecked(lane.closed)
@@ -600,9 +699,29 @@ class ControlPanel(QScrollArea):
                 self.name_edit.text().strip() or "未命名车道",
             )
 
-    def _width_changed(self, value: float) -> None:
-        if not self._updating and self.canvas.selected_lane_id:
-            self.canvas.set_lane_width(self.canvas.selected_lane_id, value)
+    def _length_changed(self) -> None:
+        if self._updating or not self.canvas.selected_lane_id:
+            return
+        lane = self._selected_lane()
+        if lane is None:
+            return
+        try:
+            self.canvas.set_lane_length(self.canvas.selected_lane_id, self.length_spin.value())
+        except ValueError as exc:
+            self.length_spin.setValue(lane_centerline_length(lane))
+            QMessageBox.warning(self, "车道长度无效", str(exc))
+
+    def _width_changed(self) -> None:
+        if self._updating or not self.canvas.selected_lane_id:
+            return
+        lane = self._selected_lane()
+        if lane is None:
+            return
+        try:
+            self.canvas.set_lane_width(self.canvas.selected_lane_id, self.width_spin.value())
+        except ValueError as exc:
+            self.width_spin.setValue(lane.width)
+            QMessageBox.warning(self, "车道宽度无效", str(exc))
 
     def _enabled_changed(self, enabled: bool) -> None:
         if not self._updating and self.canvas.selected_lane_id:

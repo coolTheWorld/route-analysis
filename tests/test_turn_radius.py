@@ -2,12 +2,13 @@ import math
 
 import pytest
 
-from route_analysis.models import PosePoint, VehicleDimensions
+from route_analysis.models import Point2D, PosePoint, VehicleDimensions
 from route_analysis.turn_radius import (
     CornerRadiusKind,
     TurnKind,
     TurnSide,
     analyze_turn_radii,
+    calculate_turn_radius,
     detect_turns,
 )
 
@@ -47,7 +48,7 @@ def test_turn_threshold_is_strict_and_yaw_is_unwrapped() -> None:
     assert sections[0].cumulative_yaw == pytest.approx(math.radians(40))
 
 
-def test_missing_yaw_splits_sections_and_is_reported() -> None:
+def test_missing_yaw_splits_automatic_sections_and_manual_interval_is_invalid() -> None:
     points = [
         PosePoint(0, 0, 0),
         PosePoint(1, 0, 0.4),
@@ -62,7 +63,6 @@ def test_missing_yaw_splits_sections_and_is_reported() -> None:
         points,
         VehicleDimensions(width=2, center_front=3, center_rear=1),
         threshold=0.5,
-        distance_window=0.5,
     )
 
     assert len(result.turns) == 2
@@ -72,6 +72,16 @@ def test_missing_yaw_splits_sections_and_is_reported() -> None:
     assert result.turns[0].end_index == 2
     assert result.turns[1].start_index == 4
     assert result.turns[1].end_index == 6
+
+    manual = calculate_turn_radius(
+        points,
+        VehicleDimensions(width=2, center_front=3, center_rear=1),
+        start_index=0,
+        end_index=6,
+    )
+    assert manual.valid is False
+    assert manual.error is not None
+    assert "3" in manual.error
 
 
 def test_small_reversal_offsets_current_turn_and_threshold_reversal_flips_it() -> None:
@@ -102,20 +112,21 @@ def test_small_reversal_offsets_current_turn_and_threshold_reversal_flips_it() -
     assert sections[1].cumulative_yaw == pytest.approx(-1.2)
 
 
-def test_four_corner_radii_use_icr_side_and_report_statistics() -> None:
+def test_whole_turn_has_front_axle_and_four_fixed_corner_radii() -> None:
     points = _arc_poses(5, 0, math.pi / 2, 21)
 
     result = analyze_turn_radii(
         points,
         VehicleDimensions(width=2, center_front=3, center_rear=1),
         threshold=math.pi / 6,
-        distance_window=0.5,
     )
 
     assert len(result.turns) == 1
     turn = result.turns[0]
+    assert turn.valid is True
     assert turn.side is TurnSide.LEFT
     assert turn.kind is TurnKind.TURN
+    assert turn.front_axle_radius == pytest.approx(5, abs=1e-6)
     expected = {
         CornerRadiusKind.FRONT_OUTER: math.sqrt(45),
         CornerRadiusKind.REAR_OUTER: math.sqrt(37),
@@ -123,15 +134,24 @@ def test_four_corner_radii_use_icr_side_and_report_statistics() -> None:
         CornerRadiusKind.REAR_INNER: math.sqrt(17),
     }
     for kind, radius in expected.items():
-        statistics = turn.statistics[kind]
-        assert statistics.minimum == pytest.approx(radius, abs=1e-6)
-        assert statistics.median == pytest.approx(radius, abs=1e-6)
-        assert statistics.maximum == pytest.approx(radius, abs=1e-6)
-        assert statistics.maximum_observation.pose_index in range(21)
-    assert result.skipped_icr_samples == 0
-    assert result.overall[CornerRadiusKind.FRONT_OUTER].maximum == pytest.approx(
-        math.sqrt(45), abs=1e-6
+        assert turn.radii[kind] == pytest.approx(radius, abs=1e-6)
+
+
+def test_whole_turn_uses_unwrapped_yaw_for_a_270_degree_turn() -> None:
+    points = _arc_poses(5, 0, 1.5 * math.pi, 61)
+
+    turn = calculate_turn_radius(
+        points,
+        VehicleDimensions(width=2, center_front=3, center_rear=1),
+        start_index=0,
+        end_index=60,
     )
+
+    assert turn.valid is True
+    assert turn.cumulative_yaw == pytest.approx(1.5 * math.pi)
+    assert turn.rotation_center == Point2D(0, 0)
+    assert turn.front_axle_radius == pytest.approx(5)
+    assert turn.side is TurnSide.LEFT
 
 
 def test_turn_side_is_relative_to_vehicle_heading_even_when_reversing() -> None:
@@ -141,16 +161,15 @@ def test_turn_side_is_relative_to_vehicle_heading_even_when_reversing() -> None:
         points,
         VehicleDimensions(width=2, center_front=3, center_rear=1),
         threshold=math.pi / 6,
-        distance_window=0.5,
     )
 
     assert result.turns[0].side is TurnSide.RIGHT
-    assert result.turns[0].statistics[
-        CornerRadiusKind.FRONT_OUTER
-    ].maximum == pytest.approx(math.sqrt(45), abs=1e-6)
+    assert result.turns[0].radii[CornerRadiusKind.FRONT_OUTER] == pytest.approx(
+        math.sqrt(45), abs=1e-6
+    )
 
 
-def test_uturn_and_zero_rotation_samples_are_classified_and_skipped() -> None:
+def test_uturn_is_classified_and_an_invalid_automatic_turn_is_retained() -> None:
     uturn = _arc_poses(5, 0, math.pi, 31)
     plateau_start = uturn[14]
     assert plateau_start.yaw is not None
@@ -176,12 +195,19 @@ def test_uturn_and_zero_rotation_samples_are_classified_and_skipped() -> None:
         uturn,
         VehicleDimensions(width=2, center_front=3, center_rear=1),
         threshold=math.pi / 6,
-        distance_window=0.01,
     )
 
     assert result.turns[0].kind is TurnKind.UTURN
     assert abs(result.turns[0].cumulative_yaw) > 0.75 * math.pi
-    assert result.skipped_icr_samples >= 1
+
+    invalid = analyze_turn_radii(
+        (PosePoint(0, 0, 0), PosePoint(0, 0, 0.4), PosePoint(0, 0, 0.8)),
+        VehicleDimensions(width=2, center_front=3, center_rear=1),
+        threshold=0.5,
+    )
+    assert len(invalid.turns) == 1
+    assert invalid.turns[0].valid is False
+    assert invalid.turns[0].error
 
 
 def test_exact_uturn_threshold_remains_a_normal_turn() -> None:

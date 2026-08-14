@@ -23,11 +23,18 @@ from PySide6.QtGui import (
     QUndoStack,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView
-from shapely.geometry import MultiPolygon, Polygon
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry.base import BaseGeometry
 
-from route_analysis.geometry import build_lane_area, lane_segment_points, vehicle_polygon
+from route_analysis.geometry import (
+    build_lane_area,
+    lane_segment_points,
+    scale_lane_to_length,
+    translate_lane,
+    vehicle_polygon,
+)
 from route_analysis.lane_generation import replace_arc_radius
 from route_analysis.models import (
     AnalysisResult,
@@ -39,12 +46,9 @@ from route_analysis.models import (
     SegmentKind,
     VehicleDimensions,
 )
+from route_analysis.radius_graphics import add_whole_turn_graphics
 from route_analysis.storage import LaneLayout
-from route_analysis.turn_radius import (
-    CornerRadiusKind,
-    RadiusObservation,
-    TurnRadiusResult,
-)
+from route_analysis.turn_radius import TurnRadiusSection
 
 
 @dataclass(slots=True)
@@ -60,6 +64,7 @@ class _DragTarget:
     lane_id: str
     index: int
     control_number: int = 0
+    grab_point: Point2D | None = None
 
 
 class _LayoutCommand(QUndoCommand):
@@ -89,6 +94,8 @@ class RouteCanvas(QGraphicsView):
     selection_changed = Signal(str, int, int)
     mouse_coordinate_changed = Signal(float, float)
     drawing_state_changed = Signal(bool)
+    radius_endpoint_selected = Signal(str, int)
+    manual_radius_cancelled = Signal(str)
 
     PATH_COLORS: ClassVar[dict[str, QColor]] = {
         "dispatched": QColor("#2474d8"),
@@ -135,12 +142,11 @@ class RouteCanvas(QGraphicsView):
         self._drag_target: _DragTarget | None = None
         self._drag_before: LaneLayout | None = None
         self._lane_preview: Lane | None = None
-        self._turn_radius_results: dict[str, TurnRadiusResult | None] = {
-            "dispatched": None,
-            "actual": None,
-        }
         self._turn_radius_layer = False
-        self._selected_radius: tuple[str, RadiusObservation] | None = None
+        self._selected_radius: tuple[str, TurnRadiusSection] | None = None
+        self._manual_radius_path: str | None = None
+        self._manual_radius_suggestions: set[int] = set()
+        self._manual_radius_start: int | None = None
 
         self.undo_stack = QUndoStack(self)
         self._rebuild_scene()
@@ -243,16 +249,20 @@ class RouteCanvas(QGraphicsView):
         self._paths = {"dispatched": tuple(dispatched), "actual": tuple(actual)}
         self._dimensions = dimensions
         self._results = {"dispatched": None, "actual": None}
-        self._turn_radius_results = {"dispatched": None, "actual": None}
         self._selected_radius = None
+        self._manual_radius_path = None
+        self._manual_radius_suggestions.clear()
+        self._manual_radius_start = None
         self._rebuild_scene()
         self.fit_content()
 
     def clear_paths(self) -> None:
         self._paths = {"dispatched": (), "actual": ()}
         self._results = {"dispatched": None, "actual": None}
-        self._turn_radius_results = {"dispatched": None, "actual": None}
         self._selected_radius = None
+        self._manual_radius_path = None
+        self._manual_radius_suggestions.clear()
+        self._manual_radius_start = None
         self._rebuild_scene()
         self.fit_content()
 
@@ -301,15 +311,6 @@ class RouteCanvas(QGraphicsView):
         self._results = {"dispatched": dispatched, "actual": actual}
         self._rebuild_scene()
 
-    def set_turn_radius_results(
-        self,
-        dispatched: TurnRadiusResult | None,
-        actual: TurnRadiusResult | None,
-    ) -> None:
-        self._turn_radius_results = {"dispatched": dispatched, "actual": actual}
-        self._selected_radius = None
-        self._rebuild_scene()
-
     def set_turn_radius_layer(self, visible: bool) -> None:
         self._turn_radius_layer = visible
         self._rebuild_scene()
@@ -317,15 +318,40 @@ class RouteCanvas(QGraphicsView):
     def show_turn_radius_observation(
         self,
         path_name: str,
-        observation: RadiusObservation,
+        observation: TurnRadiusSection,
     ) -> None:
         if path_name not in self._paths:
             raise ValueError(f"unknown path: {path_name}")
         self._selected_radius = (path_name, observation)
         self._turn_radius_layer = True
         self._rebuild_scene()
-        display = self.to_display(Point2D(observation.pose.x, observation.pose.y))
+        pose = self._paths[path_name][observation.start_index]
+        display = self.to_display(Point2D(pose.x, pose.y))
         self.centerOn(display.x, display.y)
+
+    def clear_turn_radius_observation(self) -> None:
+        self._selected_radius = None
+        self._rebuild_scene()
+
+    def set_manual_radius_mode(
+        self,
+        path_name: str | None,
+        suggested_indices: Iterable[int] = (),
+    ) -> None:
+        if path_name is not None and path_name not in self._paths:
+            raise ValueError(f"unknown path: {path_name}")
+        self._manual_radius_path = path_name
+        self._manual_radius_suggestions = set(suggested_indices)
+        self._manual_radius_start = None
+        if path_name is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        self._rebuild_scene()
+
+    def set_manual_radius_start(self, index: int | None) -> None:
+        self._manual_radius_start = index
+        self._rebuild_scene()
 
     def set_path_layer(
         self,
@@ -422,6 +448,14 @@ class RouteCanvas(QGraphicsView):
             "修改车道宽度",
             lambda layout: setattr(self._lane(layout, lane_id), "width", width),
         )
+
+    def set_lane_length(self, lane_id: str, length: float) -> None:
+        def operation(layout: LaneLayout) -> None:
+            lane = self._lane(layout, lane_id)
+            lane_index = layout.lanes.index(lane)
+            layout.lanes[lane_index] = scale_lane_to_length(lane, length)
+
+        self._mutate("修改车道长度", operation)
 
     def set_lane_default_join(self, lane_id: str, join: JoinStyle) -> None:
         self._mutate(
@@ -563,14 +597,54 @@ class RouteCanvas(QGraphicsView):
 
     def _raw_from_event(self, event: QMouseEvent) -> Point2D:
         scene_position = self.mapToScene(event.position().toPoint())
-        return self._snap(self.to_raw(Point2D(scene_position.x(), scene_position.y())))
+        return self.to_raw(Point2D(scene_position.x(), scene_position.y()))
+
+    def _path_point_candidates(self, path_name: str, raw: Point2D) -> list[int]:
+        threshold = 10 / max(abs(self.transform().m11()), 1)
+        return sorted(
+            (
+                index
+                for index, pose in enumerate(self._paths[path_name])
+                if math.hypot(pose.x - raw.x, pose.y - raw.y) <= threshold
+            ),
+            key=lambda index: (
+                math.hypot(
+                    self._paths[path_name][index].x - raw.x,
+                    self._paths[path_name][index].y - raw.y,
+                ),
+                index,
+            ),
+        )
+
+    def _choose_path_candidate(
+        self,
+        path_name: str,
+        candidates: list[int],
+        event: QMouseEvent,
+    ) -> int | None:
+        if len(candidates) == 1:
+            return candidates[0]
+        menu = QMenu(self)
+        for index in candidates:
+            pose = self._paths[path_name][index]
+            yaw = "缺失" if pose.yaw is None else f"{pose.yaw:.6f} rad"
+            action = menu.addAction(
+                f"样本 {index}  ({pose.x:.4f}, {pose.y:.4f})  yaw {yaw}"
+            )
+            action.setData(index)
+        selected = menu.exec(event.globalPosition().toPoint())
+        return None if selected is None else int(selected.data())
 
     def _hit_test(self, raw: Point2D) -> _DragTarget | None:
         threshold = 10 / max(abs(self.transform().m11()), 1)
-        lane_order = sorted(
-            self._layout.lanes,
-            key=lambda lane: lane.id != self._selected_lane_id,
-        )
+        selected = [
+            lane for lane in self._layout.lanes if lane.id == self._selected_lane_id
+        ]
+        lane_order = selected + [
+            lane
+            for lane in reversed(self._layout.lanes)
+            if lane.id != self._selected_lane_id
+        ]
         for lane in lane_order:
             for index, anchor in enumerate(lane.anchors):
                 if math.hypot(anchor.point.x - raw.x, anchor.point.y - raw.y) <= threshold:
@@ -585,14 +659,53 @@ class RouteCanvas(QGraphicsView):
                         self._selected_lane_id = lane.id
                         self._selected_segment = index
                         return _DragTarget("control", lane.id, index, number)
+        hit_point = ShapelyPoint(raw.x, raw.y)
+        for lane in lane_order:
+            try:
+                area_hit = build_lane_area(
+                    lane,
+                    tolerance=self._bezier_tolerance,
+                    miter_limit=self._miter_limit,
+                ).covers(hit_point)
+                centerline_hit = any(
+                    LineString([(point.x, point.y) for point in lane_segment_points(
+                        lane, index, tolerance=self._bezier_tolerance
+                    )]).distance(hit_point)
+                    <= threshold
+                    for index in range(len(lane.segments))
+                )
+            except ValueError:
+                continue
+            if area_hit or centerline_hit:
+                newly_selected = lane.id != self._selected_lane_id
+                self._selected_lane_id = lane.id
+                if newly_selected:
+                    self._selected_anchor = 0
+                    self._selected_segment = 0
+                return _DragTarget("lane", lane.id, -1, grab_point=raw)
         return None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             raw = self._raw_from_event(event)
+            if self._manual_radius_path is not None:
+                candidates = self._path_point_candidates(self._manual_radius_path, raw)
+                if candidates:
+                    selected = self._choose_path_candidate(
+                        self._manual_radius_path,
+                        candidates,
+                        event,
+                    )
+                    if selected is not None:
+                        self.radius_endpoint_selected.emit(
+                            self._manual_radius_path,
+                            selected,
+                        )
+                    return
             if self._drawing:
-                if not self._draft_points or self._draft_points[-1] != raw:
-                    self._draft_points.append(raw)
+                snapped = self._snap(raw)
+                if not self._draft_points or self._draft_points[-1] != snapped:
+                    self._draft_points.append(snapped)
                 self._rebuild_scene()
                 return
             target = self._hit_test(raw)
@@ -607,8 +720,9 @@ class RouteCanvas(QGraphicsView):
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if self._drawing and event.button() == Qt.MouseButton.LeftButton:
             raw = self._raw_from_event(event)
-            if not self._draft_points or self._draft_points[-1] != raw:
-                self._draft_points.append(raw)
+            snapped = self._snap(raw)
+            if not self._draft_points or self._draft_points[-1] != snapped:
+                self._draft_points.append(snapped)
             self.finish_lane_drawing()
             return
         super().mouseDoubleClickEvent(event)
@@ -619,12 +733,22 @@ class RouteCanvas(QGraphicsView):
         self.mouse_coordinate_changed.emit(raw.x, raw.y)
         if self._drag_target is not None and event.buttons() & Qt.MouseButton.LeftButton:
             snapped = self._snap(raw)
-            lane = self._lane(self._layout, self._drag_target.lane_id)
-            if self._drag_target.kind == "anchor":
-                lane.anchors[self._drag_target.index].point = snapped
+            if self._drag_target.kind == "lane":
+                if self._drag_before is None or self._drag_target.grab_point is None:
+                    return
+                original = self._lane(self._drag_before, self._drag_target.lane_id)
+                grab = self._drag_target.grab_point
+                moved = translate_lane(original, snapped.x - grab.x, snapped.y - grab.y)
+                current = self._lane(self._layout, self._drag_target.lane_id)
+                lane_index = self._layout.lanes.index(current)
+                self._layout.lanes[lane_index] = moved
             else:
-                segment = lane.segments[self._drag_target.index]
-                setattr(segment, f"control{self._drag_target.control_number}", snapped)
+                lane = self._lane(self._layout, self._drag_target.lane_id)
+                if self._drag_target.kind == "anchor":
+                    lane.anchors[self._drag_target.index].point = snapped
+                else:
+                    segment = lane.segments[self._drag_target.index]
+                    setattr(segment, f"control{self._drag_target.control_number}", snapped)
             self._rebuild_scene()
             return
         super().mouseMoveEvent(event)
@@ -633,14 +757,24 @@ class RouteCanvas(QGraphicsView):
         if self._drag_target is not None and event.button() == Qt.MouseButton.LeftButton:
             before = self._drag_before
             after = copy.deepcopy(self._layout)
+            command_text = (
+                "平移整条车道"
+                if self._drag_target.kind == "lane"
+                else "拖动车道控制点"
+            )
             self._drag_target = None
             self._drag_before = None
             if before is not None and before != after:
-                self.undo_stack.push(_LayoutCommand(self, before, after, "拖动车道控制点"))
+                self.undo_stack.push(_LayoutCommand(self, before, after, command_text))
             return
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._manual_radius_path is not None and event.key() == Qt.Key.Key_Escape:
+            path_name = self._manual_radius_path
+            self.set_manual_radius_mode(None)
+            self.manual_radius_cancelled.emit(path_name)
+            return
         if self._drawing and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             self.finish_lane_drawing()
             return
@@ -872,6 +1006,30 @@ class RouteCanvas(QGraphicsView):
             self._cosmetic_pen(QColor("#00a884"), 2, Qt.PenStyle.DashLine),
         ).setZValue(40)
 
+    def _add_manual_radius_graphics(self) -> None:
+        if self._manual_radius_path is None:
+            return
+        points = self._paths[self._manual_radius_path]
+        marker_indices = set(self._manual_radius_suggestions)
+        if self._manual_radius_start is not None:
+            marker_indices.add(self._manual_radius_start)
+        for index in sorted(marker_indices):
+            if not 0 <= index < len(points):
+                continue
+            pose = points[index]
+            display = self.to_display(Point2D(pose.x, pose.y))
+            selected = index == self._manual_radius_start
+            radius = 0.16 if selected else 0.11
+            color = QColor("#b4233f" if selected else "#f4b400")
+            self.scene().addEllipse(
+                display.x - radius,
+                display.y - radius,
+                radius * 2,
+                radius * 2,
+                self._cosmetic_pen(color, 2),
+                QBrush(QColor("#ffffff")),
+            ).setZValue(52)
+
     def _add_turn_radius_graphics(self) -> None:
         if (
             not self._turn_radius_layer
@@ -879,84 +1037,17 @@ class RouteCanvas(QGraphicsView):
             or self._dimensions is None
         ):
             return
-        path_name, observation = self._selected_radius
-        color = self.PATH_COLORS[path_name]
-        vehicle = vehicle_polygon(observation.pose, self._dimensions)
-        fill = QColor(color)
-        fill.setAlpha(45)
-        self.scene().addPolygon(
-            self._display_polygon(vehicle.exterior.coords),
-            self._cosmetic_pen(color, 2),
-            QBrush(fill),
-        ).setZValue(60)
-
-        center = self.to_display(observation.rotation_center)
-        cross_size = 0.16
-        self.scene().addLine(
-            center.x - cross_size,
-            center.y,
-            center.x + cross_size,
-            center.y,
-            self._cosmetic_pen(QColor("#111827"), 2),
-        ).setZValue(70)
-        self.scene().addLine(
-            center.x,
-            center.y - cross_size,
-            center.x,
-            center.y + cross_size,
-            self._cosmetic_pen(QColor("#111827"), 2),
-        ).setZValue(70)
-
-        labels = {
-            CornerRadiusKind.FRONT_OUTER: "前外角",
-            CornerRadiusKind.REAR_OUTER: "后外角",
-            CornerRadiusKind.FRONT_INNER: "前内角",
-            CornerRadiusKind.REAR_INNER: "后内角",
-        }
-        colors = {
-            CornerRadiusKind.FRONT_OUTER: QColor("#b4233f"),
-            CornerRadiusKind.REAR_OUTER: QColor("#d86b1f"),
-            CornerRadiusKind.FRONT_INNER: QColor("#2474d8"),
-            CornerRadiusKind.REAR_INNER: QColor("#16794b"),
-        }
-        for kind in CornerRadiusKind:
-            corner = observation.corners[kind]
-            display_corner = self.to_display(corner)
-            radius_color = colors[kind]
-            self.scene().addLine(
-                center.x,
-                center.y,
-                display_corner.x,
-                display_corner.y,
-                self._cosmetic_pen(radius_color, 1.5),
-            ).setZValue(65)
-
-            radius = observation.radii[kind]
-            angle = math.atan2(
-                corner.y - observation.rotation_center.y,
-                corner.x - observation.rotation_center.x,
-            )
-            arc_path = QPainterPath()
-            for sample_index in range(17):
-                sample_angle = angle - 0.12 + 0.24 * sample_index / 16
-                raw = Point2D(
-                    observation.rotation_center.x + radius * math.cos(sample_angle),
-                    observation.rotation_center.y + radius * math.sin(sample_angle),
-                )
-                display = self.to_display(raw)
-                if sample_index == 0:
-                    arc_path.moveTo(display.x, display.y)
-                else:
-                    arc_path.lineTo(display.x, display.y)
-            self.scene().addPath(
-                arc_path,
-                self._cosmetic_pen(radius_color, 2),
-            ).setZValue(66)
-            text_item = self.scene().addText(f"{labels[kind]} {radius:.3f} m")
-            text_item.setDefaultTextColor(radius_color)
-            text_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
-            text_item.setPos(display_corner.x, display_corner.y)
-            text_item.setZValue(80)
+        path_name, measurement = self._selected_radius
+        add_whole_turn_graphics(
+            self.scene(),
+            self._paths[path_name],
+            measurement,
+            self._dimensions,
+            self.PATH_COLORS[path_name],
+            to_display=self.to_display,
+            display_polygon=self._display_polygon,
+            cosmetic_pen=self._cosmetic_pen,
+        )
 
     def _rebuild_scene(self) -> None:
         self.scene().clear()
@@ -966,6 +1057,7 @@ class RouteCanvas(QGraphicsView):
             self._add_lane_graphics(self._lane_preview, preview=True)
         self._add_route_graphics("dispatched")
         self._add_route_graphics("actual")
+        self._add_manual_radius_graphics()
         self._add_turn_radius_graphics()
         if self._drawing:
             self._add_draft_graphics()
