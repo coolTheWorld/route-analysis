@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from uuid import uuid4
 
 from PySide6.QtCore import QTimer, Signal
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from route_analysis.lane_generation import (
@@ -24,7 +27,81 @@ from route_analysis.lane_generation import (
     LaneGenerationResult,
     generate_lane,
 )
+from route_analysis.logging_setup import log_event
 from route_analysis.models import PosePoint
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class AutoLaneSelection:
+    generation: LaneGenerationResult
+    source: str
+    mode: str
+    maximum_deviation: float
+
+
+def run_auto_lane_dialog(
+    parent: QWidget,
+    paths: Mapping[str, Sequence[PosePoint]],
+    *,
+    default_width: float,
+    maximum_deviation: float,
+    last_mode: BendMode,
+    preview_callback: Callable[[LaneGenerationResult | None], None],
+) -> AutoLaneSelection | None:
+    """Run one preview lifecycle and return only the confirmed generation."""
+
+    dialog = AutoLaneDialog(
+        paths,
+        default_width=default_width,
+        maximum_deviation=maximum_deviation,
+        last_mode=last_mode,
+    )
+    dialog.setParent(parent)
+    dialog.preview_changed.connect(preview_callback)
+    dialog.refresh_preview()
+    accepted = dialog.exec() == AutoLaneDialog.DialogCode.Accepted
+    preview_callback(None)
+    if not accepted or dialog.generation_result is None:
+        return None
+    return AutoLaneSelection(
+        dialog.generation_result,
+        str(dialog.source_combo.currentData()),
+        str(dialog.mode_combo.currentData()),
+        dialog.deviation_spin.value(),
+    )
+
+
+def log_auto_lane_selection(
+    selection: AutoLaneSelection,
+    source_path: Sequence[PosePoint],
+) -> None:
+    """Record summary and full diagnostic data for one confirmed generation."""
+
+    result = selection.generation
+    metrics = result.metrics
+    log_event(
+        LOGGER,
+        logging.INFO,
+        "lane_generated",
+        source=selection.source,
+        lane_id=result.lane.id,
+        mode=selection.mode,
+        width=result.lane.width,
+        maximum_deviation=metrics.maximum_deviation,
+        anchors=metrics.anchors,
+        segments=metrics.segments,
+        arc_failures=metrics.arc_failures,
+    )
+    log_event(
+        LOGGER,
+        logging.DEBUG,
+        "lane_generation_full_source",
+        source=selection.source,
+        path=source_path,
+        generated_lane=result.lane,
+    )
 
 
 class AutoLaneDialog(QDialog):

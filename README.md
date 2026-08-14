@@ -8,11 +8,13 @@ Windows x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单
 - 同画布显示下发/实际路径，中心线、每点车辆矩形、越界标记可分别开关或隔离查看。
 - 后端坐标按叉车前轴中心解释；车宽、中心前距、中心后距为米，yaw 和地图方向为弧度。
 - 车辆尺寸支持全局默认与 VIN 覆盖；缺 yaw 点不猜测方向，只显示中心点并排除相关分析段。
-- 鼠标绘制多锚点车道；每段支持直线或三次贝塞尔，开放平头或闭合环，每车道独立总宽。
+- 鼠标绘制多锚点车道，或从下发/实际路径自动生成；中心线支持直线、真实圆弧和分段三次贝塞尔，开放平头或闭合环，每车道独立总宽。
 - 新车道默认尖角；车道默认连接及单锚点覆盖支持尖角/圆角，尖角有 miter 上限。
+- 自动车道提供半透明预览、最大拟合偏差、弯道模式和圆弧失败回退；确认后仅新增并作为一次撤销操作，圆弧半径可查看和修改。
 - 多个启用车道区域取并集；按位置/yaw 步长连续插值车辆包络，分别给出绿/黄/红结果、最小净距与首次越界位置。
+- 自动识别转弯/掉头，分别统计车辆前外、后外、前内、后内四角半径的最小值、中位数、最大值及位置，并可在画布定位瞬时旋转中心。
 - 车道编辑支持拖动、原始坐标数值输入、路径点吸附、撤销/重做、手动保存、前版备份、导入仅替换和导出。
-- 本地便携存储；打包版使用 EXE 同级 `data/`。
+- 本地便携存储和结构化轮转日志；打包版使用 EXE 同级 `data/` 与 `log/`。
 
 完整操作见 [用户手册](docs/user-guide.md)，接口事实见 [API 契约](docs/api-contract.md)。
 
@@ -55,7 +57,7 @@ Windows x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单
 .\scripts\build.cmd
 ```
 
-发布目录为 `dist\RouteAnalysis\`，入口为 `RouteAnalysis.exe`。它是文件夹模式发布物，必须连同目录中其他文件一起复制。首次保存后会自动创建 `dist\RouteAnalysis\data\`。
+发布目录为 `dist\RouteAnalysis\`，入口为 `RouteAnalysis.exe`。它是文件夹模式发布物，必须连同目录中其他文件一起复制。首次正常运行后会按需创建 `dist\RouteAnalysis\data\` 和 `dist\RouteAnalysis\log\`。
 
 验证发布物：
 
@@ -66,16 +68,19 @@ if ($LASTEXITCODE -ne 0) { throw "smoke test failed" }
 
 ## 运行期数据与安全说明
 
-源码版数据位于仓库 `data/`；打包版位于 EXE 同级 `data/`：
+源码版数据位于仓库 `data/`，日志位于同级 `log/`；打包版位于 EXE 同级同名目录：
 
 ```text
 data/
 ├── config.json
 ├── vehicle-profiles.json
 └── lanes/<server-id>/<mapId>.json
+log/
+├── route-analysis.log
+└── route-analysis.<日期>.<序号>.log
 ```
 
-根据用户明确选择，`config.json` 中密码明文保存。`data/` 已被 Git 忽略，应用不记录密码、Authorization 或访问令牌。请仅在受信任的 Windows 账号和设备上使用，并限制目录访问权限。详见 [ADR 0001](docs/adr/0001-store-credentials-in-plaintext.md) 与 [威胁模型](docs/threat-model.md)。
+根据用户明确选择，`config.json` 中密码明文保存。日志默认 INFO；切换到 DEBUG 后会原样记录密码、令牌、Authorization/tenant 请求头、完整配置、接口参数与响应、路径坐标和导入文件正文，不做脱敏、加密或额外权限控制。日志在每天零点或达到 20 MiB 时轮转，保留最近 30 个历史文件。`data/` 与 `log/` 均被 Git 忽略且不打入发布包。详见 [ADR 0001](docs/adr/0001-store-credentials-in-plaintext.md)、[ADR 0004](docs/adr/0004-record-sensitive-debug-logs.md) 与 [威胁模型](docs/threat-model.md)。
 
 ## 只读保证
 
