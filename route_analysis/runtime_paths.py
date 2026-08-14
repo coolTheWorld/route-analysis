@@ -23,3 +23,18 @@ def resolve_data_dir(
     source_file = Path(__file__ if module_file is None else module_file).resolve()
     base_dir = executable_path.parent if is_frozen else source_file.parent.parent
     return base_dir / "data"
+
+
+def resolve_log_dir(
+    *,
+    frozen: bool | None = None,
+    executable: str | Path | None = None,
+    module_file: str | Path | None = None,
+) -> Path:
+    """Return the log directory beside the corresponding data directory."""
+
+    return resolve_data_dir(
+        frozen=frozen,
+        executable=executable,
+        module_file=module_file,
+    ).with_name("log")

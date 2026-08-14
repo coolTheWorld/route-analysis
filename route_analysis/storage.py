@@ -93,6 +93,8 @@ class AppConfig:
     map_direction: float = 0.0
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
     snap_to_path: bool = True
+    lane_generation_mode: str = "sharp"
+    log_level: str = "INFO"
 
     @property
     def first_run_complete(self) -> bool:
@@ -132,8 +134,13 @@ class AppConfig:
                 "clearance_threshold": self.analysis.clearance_threshold,
                 "bezier_tolerance": self.analysis.bezier_tolerance,
                 "miter_limit": self.analysis.miter_limit,
+                "turn_threshold": self.analysis.turn_threshold,
+                "radius_window": self.analysis.radius_window,
+                "lane_generation_deviation": self.analysis.lane_generation_deviation,
             },
             "snap_to_path": self.snap_to_path,
+            "lane_generation_mode": self.lane_generation_mode,
+            "log_level": self.log_level,
         }
 
     @classmethod
@@ -166,8 +173,17 @@ class AppConfig:
                     ),
                     bezier_tolerance=_float_value(analysis.get("bezier_tolerance", 0.02)),
                     miter_limit=_float_value(analysis.get("miter_limit", 4.0)),
+                    turn_threshold=_float_value(
+                        analysis.get("turn_threshold", math.pi / 6)
+                    ),
+                    radius_window=_float_value(analysis.get("radius_window", 0.5)),
+                    lane_generation_deviation=_float_value(
+                        analysis.get("lane_generation_deviation", 0.05)
+                    ),
                 ),
                 snap_to_path=bool(payload.get("snap_to_path", True)),
+                lane_generation_mode=str(payload.get("lane_generation_mode", "sharp")),
+                log_level=str(payload.get("log_level", "INFO")).upper(),
             )
         except (TypeError, ValueError) as exc:
             raise StorageError("配置文件包含无效数值") from exc
@@ -185,6 +201,10 @@ class ConfigRepository:
             not math.isfinite(config.default_lane_width) or config.default_lane_width <= 0
         ):
             raise StorageError("默认车道宽度必须大于零")
+        if config.lane_generation_mode not in {"sharp", "round", "bezier"}:
+            raise StorageError("自动车道弯道模式无效")
+        if config.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+            raise StorageError("日志级别无效")
         _atomic_json_write(self.path, config.to_dict(), backup=True)
 
 
