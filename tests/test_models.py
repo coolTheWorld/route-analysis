@@ -46,3 +46,18 @@ def test_new_lane_defaults_to_sharp_join() -> None:
 
     assert lane.default_join is JoinStyle.MITER
     assert lane.segments[0].kind is SegmentKind.LINE
+
+
+def test_arc_segment_requires_center_and_direction() -> None:
+    center = Point2D(0, 0)
+
+    arc = LaneSegment(
+        kind=SegmentKind.ARC,
+        arc_center=center,
+        clockwise=False,
+    )
+
+    assert arc.arc_center == center
+    assert arc.clockwise is False
+    with pytest.raises(ValueError, match="arc segment center and direction"):
+        LaneSegment(kind=SegmentKind.ARC)

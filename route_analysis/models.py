@@ -70,6 +70,7 @@ class AnalysisSettings:
 
 class SegmentKind(StrEnum):
     LINE = "line"
+    ARC = "arc"
     CUBIC = "cubic"
 
 
@@ -89,10 +90,16 @@ class LaneSegment:
     kind: SegmentKind = SegmentKind.LINE
     control1: Point2D | None = None
     control2: Point2D | None = None
+    arc_center: Point2D | None = None
+    clockwise: bool | None = None
 
     def __post_init__(self) -> None:
         if self.kind is SegmentKind.CUBIC and (self.control1 is None or self.control2 is None):
             raise ValueError("cubic segment control points are required")
+        if self.kind is SegmentKind.ARC and (
+            self.arc_center is None or self.clockwise is None
+        ):
+            raise ValueError("arc segment center and direction are required")
 
 
 @dataclass(slots=True)

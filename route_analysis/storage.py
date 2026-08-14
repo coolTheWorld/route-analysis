@@ -265,6 +265,8 @@ def _lane_to_dict(lane: Lane) -> dict[str, object]:
                 "kind": segment.kind.value,
                 "control1": _point_dict(segment.control1) if segment.control1 else None,
                 "control2": _point_dict(segment.control2) if segment.control2 else None,
+                "arcCenter": _point_dict(segment.arc_center) if segment.arc_center else None,
+                "clockwise": segment.clockwise,
             }
             for segment in lane.segments
         ],
@@ -303,6 +305,12 @@ def _lane_from(value: object) -> Lane:
                     _point_from(raw_segment["control2"])
                     if raw_segment.get("control2") is not None
                     else None,
+                    _point_from(raw_segment["arcCenter"])
+                    if raw_segment.get("arcCenter") is not None
+                    else None,
+                    bool(raw_segment["clockwise"])
+                    if raw_segment.get("clockwise") is not None
+                    else None,
                 )
             )
         return Lane(
@@ -329,7 +337,7 @@ class LaneLayout:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "serverId": self.server_id,
             "mapId": self.map_id,
             "units": {"distance": "m", "angle": "rad"},
@@ -338,7 +346,7 @@ class LaneLayout:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> LaneLayout:
-        if payload.get("schemaVersion") != 1:
+        if payload.get("schemaVersion") not in (1, 2):
             raise DataContractError("不支持的车道文件版本")
         units = payload.get("units")
         valid_units = (
