@@ -186,7 +186,6 @@ class SettingsDialog(QDialog):
         self.turn_threshold_spin = _spin(
             0.001, 10, settings.turn_threshold, decimals=6, suffix=" rad"
         )
-        self.radius_window_spin = _spin(0.001, 100, settings.radius_window, suffix=" m")
         self.generation_deviation_spin = _spin(
             0.001, 10, settings.lane_generation_deviation, suffix=" m"
         )
@@ -214,7 +213,6 @@ class SettingsDialog(QDialog):
         form.addRow("贝塞尔离散容差", self.bezier_tolerance_spin)
         form.addRow("尖角 miter 上限", self.miter_limit_spin)
         form.addRow("转弯识别阈值", self.turn_threshold_spin)
-        form.addRow("半径距离窗口", self.radius_window_spin)
         form.addRow("自动车道最大偏差", self.generation_deviation_spin)
         form.addRow("默认弯道生成模式", self.generation_mode_combo)
         form.addRow("日志级别", self.log_level_combo)
@@ -273,7 +271,6 @@ class SettingsDialog(QDialog):
                 bezier_tolerance=self.bezier_tolerance_spin.value(),
                 miter_limit=self.miter_limit_spin.value(),
                 turn_threshold=self.turn_threshold_spin.value(),
-                radius_window=self.radius_window_spin.value(),
                 lane_generation_deviation=self.generation_deviation_spin.value(),
             )
             profiles = self._collect_profiles()

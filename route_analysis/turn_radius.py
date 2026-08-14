@@ -1,12 +1,10 @@
-"""Turn detection and vehicle-corner radius analysis for scheduling poses."""
+"""Whole-turn radius detection and measurement for scheduling poses."""
 
 from __future__ import annotations
 
 import math
-import statistics
-from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from route_analysis.geometry import shortest_angle_delta
@@ -38,40 +36,28 @@ class DetectedTurn:
 
 
 @dataclass(frozen=True, slots=True)
-class RadiusObservation:
-    pose_index: int
-    pose: PosePoint
-    rotation_center: Point2D
-    side: TurnSide
-    radii: Mapping[CornerRadiusKind, float]
-    corners: Mapping[CornerRadiusKind, Point2D]
-
-
-@dataclass(frozen=True, slots=True)
-class RadiusStatistics:
-    minimum: float
-    median: float
-    maximum: float
-    maximum_observation: RadiusObservation
-
-
-@dataclass(frozen=True, slots=True)
 class TurnRadiusSection:
     start_index: int
     end_index: int
     cumulative_yaw: float
-    side: TurnSide
     kind: TurnKind
-    observations: tuple[RadiusObservation, ...]
-    statistics: Mapping[CornerRadiusKind, RadiusStatistics]
+    side: TurnSide | None = None
+    rotation_center: Point2D | None = None
+    front_axle_radius: float | None = None
+    radii: Mapping[CornerRadiusKind, float] = field(default_factory=dict)
+    corners: Mapping[CornerRadiusKind, Point2D] = field(default_factory=dict)
+    end_corners: Mapping[CornerRadiusKind, Point2D] = field(default_factory=dict)
+    error: str | None = None
+
+    @property
+    def valid(self) -> bool:
+        return self.error is None and self.rotation_center is not None
 
 
 @dataclass(frozen=True, slots=True)
 class TurnRadiusResult:
     turns: tuple[TurnRadiusSection, ...]
-    overall: Mapping[CornerRadiusKind, RadiusStatistics]
     missing_yaw_indices: tuple[int, ...]
-    skipped_icr_samples: int
 
     @property
     def incomplete(self) -> bool:
@@ -176,63 +162,57 @@ def detect_turns(
     return tuple(turns)
 
 
-def _cumulative_distances(
+def cumulative_yaw_between(
     points: Sequence[PosePoint], start_index: int, end_index: int
-) -> list[float]:
-    distances = [0.0]
+) -> float:
+    """Continuously unwrap yaw between two ordered source samples."""
+
+    if not 0 <= start_index < end_index < len(points):
+        raise ValueError("入弯样本必须位于出弯样本之前")
+    missing = [
+        index
+        for index in range(start_index, end_index + 1)
+        if points[index].yaw is None
+    ]
+    if missing:
+        joined = "、".join(str(index) for index in missing)
+        raise ValueError(f"样本 {joined} 缺少 yaw")
+    cumulative = 0.0
     for index in range(start_index, end_index):
-        first = points[index]
-        second = points[index + 1]
-        distances.append(distances[-1] + math.hypot(second.x - first.x, second.y - first.y))
-    return distances
+        start_yaw = points[index].yaw
+        end_yaw = points[index + 1].yaw
+        assert start_yaw is not None and end_yaw is not None
+        cumulative += shortest_angle_delta(start_yaw, end_yaw)
+    return cumulative
 
 
-def _window_indices(
-    distances: Sequence[float], local_index: int, window: float
-) -> tuple[int, int]:
-    half_window = window / 2
-    center = distances[local_index]
-    lower_target = center - half_window
-    upper_target = center + half_window
-    lower = local_index
-    while lower > 0 and distances[lower] > lower_target:
-        lower -= 1
-    upper = local_index
-    while upper < len(distances) - 1 and distances[upper] < upper_target:
-        upper += 1
-    if lower == upper:
-        if upper < len(distances) - 1:
-            upper += 1
-        elif lower > 0:
-            lower -= 1
-    return lower, upper
+def equivalent_rotation_center(
+    start: PosePoint,
+    end: PosePoint,
+    cumulative_yaw: float,
+) -> Point2D | None:
+    """Solve one fixed center from endpoint positions and unwrapped rotation."""
 
-
-def instantaneous_rotation_center(start: PosePoint, end: PosePoint) -> Point2D | None:
-    """Compute a planar instantaneous rotation center from two valid poses."""
-
-    if start.yaw is None or end.yaw is None:
-        return None
-    yaw_delta = shortest_angle_delta(start.yaw, end.yaw)
-    if abs(yaw_delta) <= 1e-12:
+    if not math.isfinite(cumulative_yaw) or abs(cumulative_yaw) <= 1e-12:
         return None
     chord_x = end.x - start.x
     chord_y = end.y - start.y
     chord = math.hypot(chord_x, chord_y)
     if chord <= 1e-12:
         return None
-    tangent = math.tan(yaw_delta / 2)
-    if abs(tangent) <= 1e-12:
+    tangent = math.tan(cumulative_yaw / 2)
+    if not math.isfinite(tangent) or abs(tangent) <= 1e-12:
         return None
     midpoint_x = (start.x + end.x) / 2
     midpoint_y = (start.y + end.y) / 2
     normal_x = -chord_y / chord
     normal_y = chord_x / chord
     offset = chord / (2 * tangent)
-    center = Point2D(midpoint_x + normal_x * offset, midpoint_y + normal_y * offset)
-    if not math.isfinite(center.x) or not math.isfinite(center.y):
+    x = midpoint_x + normal_x * offset
+    y = midpoint_y + normal_y * offset
+    if not math.isfinite(x) or not math.isfinite(y):
         return None
-    return center
+    return Point2D(0.0 if abs(x) <= 1e-12 else x, 0.0 if abs(y) <= 1e-12 else y)
 
 
 def _world_corner(pose: PosePoint, longitudinal: float, lateral: float) -> Point2D:
@@ -246,25 +226,15 @@ def _world_corner(pose: PosePoint, longitudinal: float, lateral: float) -> Point
     )
 
 
-def _corner_radii(
-    pose: PosePoint, center: Point2D, dimensions: VehicleDimensions
-) -> tuple[
-    TurnSide,
-    dict[CornerRadiusKind, float],
-    dict[CornerRadiusKind, Point2D],
-]:
-    if pose.yaw is None:
-        raise ValueError("corner radius requires a pose with yaw")
-    heading_x = math.cos(pose.yaw)
-    heading_y = math.sin(pose.yaw)
-    center_offset_x = center.x - pose.x
-    center_offset_y = center.y - pose.y
-    cross = heading_x * center_offset_y - heading_y * center_offset_x
-    side = TurnSide.LEFT if cross > 0 else TurnSide.RIGHT
+def _corner_points(
+    pose: PosePoint,
+    dimensions: VehicleDimensions,
+    side: TurnSide,
+) -> dict[CornerRadiusKind, Point2D]:
     half_width = dimensions.width / 2
     inner_lateral = half_width if side is TurnSide.LEFT else -half_width
     outer_lateral = -inner_lateral
-    corners = {
+    return {
         CornerRadiusKind.FRONT_OUTER: _world_corner(
             pose, dimensions.center_front, outer_lateral
         ),
@@ -278,32 +248,83 @@ def _corner_radii(
             pose, -dimensions.center_rear, inner_lateral
         ),
     }
+
+
+def _invalid_section(
+    start_index: int,
+    end_index: int,
+    cumulative_yaw: float,
+    error: str,
+) -> TurnRadiusSection:
+    kind = (
+        TurnKind.UTURN
+        if _strictly_exceeds(abs(cumulative_yaw), 0.75 * math.pi)
+        else TurnKind.TURN
+    )
+    return TurnRadiusSection(start_index, end_index, cumulative_yaw, kind, error=error)
+
+
+def calculate_turn_radius(
+    points: Sequence[PosePoint],
+    dimensions: VehicleDimensions,
+    *,
+    start_index: int,
+    end_index: int,
+    cumulative_yaw: float | None = None,
+) -> TurnRadiusSection:
+    """Calculate one whole-turn front-axle and four-corner radius measurement."""
+
+    try:
+        yaw_change = (
+            cumulative_yaw_between(points, start_index, end_index)
+            if cumulative_yaw is None
+            else cumulative_yaw
+        )
+    except ValueError as exc:
+        return _invalid_section(start_index, end_index, 0.0, str(exc))
+    start = points[start_index]
+    end = points[end_index]
+    if start.yaw is None or end.yaw is None:
+        return _invalid_section(start_index, end_index, yaw_change, "转弯端点缺少 yaw")
+    if abs(yaw_change) <= 1e-12:
+        return _invalid_section(start_index, end_index, yaw_change, "累计 yaw 变化为零")
+    center = equivalent_rotation_center(start, end, yaw_change)
+    if center is None:
+        return _invalid_section(start_index, end_index, yaw_change, "无法求得有限整弯等效旋转中心")
+
+    heading_x = math.cos(start.yaw)
+    heading_y = math.sin(start.yaw)
+    cross = heading_x * (center.y - start.y) - heading_y * (center.x - start.x)
+    if abs(cross) <= 1e-12:
+        return _invalid_section(start_index, end_index, yaw_change, "旋转中心不在车体左右侧")
+    side = TurnSide.LEFT if cross > 0 else TurnSide.RIGHT
+    corners = _corner_points(start, dimensions, side)
+    end_corners = _corner_points(end, dimensions, side)
     radii = {
         kind: math.hypot(corner.x - center.x, corner.y - center.y)
         for kind, corner in corners.items()
     }
-    return side, radii, corners
-
-
-def _statistics(
-    observations: Sequence[RadiusObservation], kind: CornerRadiusKind
-) -> RadiusStatistics:
-    maximum_observation = max(observations, key=lambda observation: observation.radii[kind])
-    values = [observation.radii[kind] for observation in observations]
-    return RadiusStatistics(
-        minimum=min(values),
-        median=statistics.median(values),
-        maximum=maximum_observation.radii[kind],
-        maximum_observation=maximum_observation,
+    front_axle_radius = math.hypot(start.x - center.x, start.y - center.y)
+    values = (front_axle_radius, *radii.values())
+    if not all(math.isfinite(value) for value in values):
+        return _invalid_section(start_index, end_index, yaw_change, "转弯半径不是有限数")
+    kind = (
+        TurnKind.UTURN
+        if _strictly_exceeds(abs(yaw_change), 0.75 * math.pi)
+        else TurnKind.TURN
     )
-
-
-def _summaries(
-    observations: Sequence[RadiusObservation],
-) -> dict[CornerRadiusKind, RadiusStatistics]:
-    if not observations:
-        return {}
-    return {kind: _statistics(observations, kind) for kind in CornerRadiusKind}
+    return TurnRadiusSection(
+        start_index,
+        end_index,
+        yaw_change,
+        kind,
+        side,
+        center,
+        front_axle_radius,
+        radii,
+        corners,
+        end_corners,
+    )
 
 
 def analyze_turn_radii(
@@ -311,59 +332,21 @@ def analyze_turn_radii(
     dimensions: VehicleDimensions,
     *,
     threshold: float = math.pi / 6,
-    distance_window: float = 0.5,
 ) -> TurnRadiusResult:
-    """Analyze all detected turns and four vehicle-corner radius distributions."""
+    """Detect and calculate one whole-turn measurement per automatic turn."""
 
     _validate_positive(threshold, "turn threshold")
-    _validate_positive(distance_window, "radius distance window")
-    detected = detect_turns(points, threshold=threshold)
-    sections: list[TurnRadiusSection] = []
-    all_observations: list[RadiusObservation] = []
-    skipped = 0
-    for turn in detected:
-        distances = _cumulative_distances(points, turn.start_index, turn.end_index)
-        observations: list[RadiusObservation] = []
-        for pose_index in range(turn.start_index, turn.end_index + 1):
-            local_index = pose_index - turn.start_index
-            lower, upper = _window_indices(distances, local_index, distance_window)
-            center = instantaneous_rotation_center(
-                points[turn.start_index + lower], points[turn.start_index + upper]
-            )
-            pose = points[pose_index]
-            if center is None or pose.yaw is None:
-                skipped += 1
-                continue
-            side, radii, corners = _corner_radii(pose, center, dimensions)
-            if not all(math.isfinite(value) for value in radii.values()):
-                skipped += 1
-                continue
-            observations.append(
-                RadiusObservation(pose_index, pose, center, side, radii, corners)
-            )
-        if not observations:
-            continue
-        side_counts = Counter(observation.side for observation in observations)
-        side = side_counts.most_common(1)[0][0]
-        kind = (
-            TurnKind.UTURN
-            if _strictly_exceeds(abs(turn.cumulative_yaw), 0.75 * math.pi)
-            else TurnKind.TURN
+    turns = tuple(
+        calculate_turn_radius(
+            points,
+            dimensions,
+            start_index=detected.start_index,
+            end_index=detected.end_index,
+            cumulative_yaw=detected.cumulative_yaw,
         )
-        section = TurnRadiusSection(
-            turn.start_index,
-            turn.end_index,
-            turn.cumulative_yaw,
-            side,
-            kind,
-            tuple(observations),
-            _summaries(observations),
-        )
-        sections.append(section)
-        all_observations.extend(observations)
+        for detected in detect_turns(points, threshold=threshold)
+    )
     return TurnRadiusResult(
-        tuple(sections),
-        _summaries(all_observations),
+        turns,
         tuple(index for index, point in enumerate(points) if point.yaw is None),
-        skipped,
     )

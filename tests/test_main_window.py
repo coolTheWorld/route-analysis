@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,12 @@ from route_analysis.logging_setup import configure_logging
 from route_analysis.main_window import MainWindow
 from route_analysis.models import PosePoint, VehicleDimensions
 from route_analysis.storage import AppConfig, ConfigRepository
+from route_analysis.turn_measurements import (
+    MeasurementScope,
+    RadiusMeasurementRepository,
+    RadiusMeasurementState,
+    path_fingerprint,
+)
 
 
 class FakeClient:
@@ -87,7 +94,7 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
 
     qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
     qtbot.waitUntil(
-        lambda: "未识别到转弯" in window.control_panel.radius_summaries["dispatched"].text()
+        lambda: "自动 0" in window.control_panel.radius_summaries["dispatched"].text()
     )
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
@@ -140,3 +147,90 @@ def test_logging_failure_status_is_persistent_and_recovers(
     manager.handler._publish_state(True)
     qtbot.waitUntil(lambda: window.log_status_label.text() == "")
     manager.close()
+
+
+def test_failed_radius_persistence_restores_previous_state(
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: FakeClient(),
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+    previous = RadiusMeasurementState("fingerprint")
+    mutated = RadiusMeasurementState("fingerprint")
+    mutated.add_manual(0, 2)
+    window._radius_states["dispatched"] = mutated
+    monkeypatch.setattr(window, "_persist_radius_state", lambda _path_name: False)
+
+    committed = window._commit_radius_state("dispatched", previous)
+
+    assert committed is False
+    restored = window._radius_states["dispatched"]
+    assert restored is previous
+    assert restored.records == ()
+
+
+def test_automatic_and_manual_radius_measurements_are_saved_locally(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    make_config(tmp_path)
+    client = FakeClient()
+    window = MainWindow(tmp_path, client_factory=lambda _settings: client, auto_load=False)
+    qtbot.addWidget(window)
+    order = client.list_orders(page_no=1, page_size=20).items[0]
+    task = client.list_tasks(order_id=order.id, page_no=1, page_size=20).items[0]
+    command = client.list_commands(task_id=task.id)[0]
+    window._current_order = order
+    window._current_task = task
+    window._current_command = command
+    window._lane_key = (window._server_id(), "7")
+    path = tuple(
+        PosePoint(5 * math.cos(angle), 5 * math.sin(angle), angle + math.pi / 2)
+        for angle in (index * math.pi / 40 for index in range(21))
+    )
+
+    window._show_paths("VIN-1", (path, ()))
+    window.control_panel.radius_auto_buttons["dispatched"].click()
+
+    tree = window.control_panel.radius_trees["dispatched"]
+
+    def group_child_count(index: int) -> int:
+        group = tree.topLevelItem(index)
+        assert group is not None
+        return group.childCount()
+
+    qtbot.waitUntil(lambda: group_child_count(0) == 1)
+    assert group_child_count(1) == 0
+    window.control_panel.radius_manual_buttons["dispatched"].click()
+    window._radius_endpoint_selected("dispatched", 0)
+    window._radius_endpoint_selected("dispatched", 20)
+    assert group_child_count(1) == 1
+
+    scope = MeasurementScope(
+        window._server_id(),
+        "suntae",
+        order.id,
+        task.id,
+        command.id,
+        "dispatched",
+    )
+    saved = RadiusMeasurementRepository(tmp_path).load(scope, path_fingerprint(path))
+    assert len(saved.automatic_records) == 1
+    assert len(saved.manual_records) == 1
+
+    window._clear_automatic_radii_for_threshold_change()
+
+    assert group_child_count(0) == 0
+    assert group_child_count(1) == 1
+    saved_after_threshold_change = RadiusMeasurementRepository(tmp_path).load(
+        scope, path_fingerprint(path)
+    )
+    assert saved_after_threshold_change.automatic_records == ()
+    assert len(saved_after_threshold_change.manual_records) == 1
+    assert "重新自动计算" in window.status_label.text()

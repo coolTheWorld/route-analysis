@@ -10,13 +10,17 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 
+from route_analysis import __version__
 from route_analysis.canvas import RouteCanvas
 from route_analysis.control_panel import ControlPanel
 from route_analysis.lane_generation import BendMode, generate_lane
 from route_analysis.models import Point2D, PosePoint, VehicleDimensions
 from route_analysis.storage import LaneLayout
 from route_analysis.theme import APPLICATION_STYLESHEET
-from route_analysis.turn_radius import CornerRadiusKind, analyze_turn_radii
+from route_analysis.turn_measurements import (
+    RadiusMeasurementState,
+    recalculate_measurements,
+)
 
 
 def main() -> int:
@@ -48,21 +52,19 @@ def main() -> int:
         for angle in (index * math.pi / 40 for index in range(21))
     )
     dimensions = VehicleDimensions(2, 3, 1)
-    radius_result = analyze_turn_radii(path, dimensions)
+    radius_state = RadiusMeasurementState("release-preview")
+    radius_state.replace_automatic(((0, len(path) - 1),))
+    measurements = recalculate_measurements(radius_state, path, dimensions)
 
     canvas = RouteCanvas()
     canvas.load_layout(LaneLayout("aaaaaaaaaaaaaaaa", "42", [lane]))
     canvas.set_paths(path, (), dimensions)
-    canvas.set_turn_radius_results(radius_result, None)
-    observation = radius_result.turns[0].statistics[
-        CornerRadiusKind.FRONT_OUTER
-    ].maximum_observation
-    canvas.show_turn_radius_observation("dispatched", observation)
+    canvas.show_turn_radius_observation("dispatched", measurements[0].radius)
     panel = ControlPanel(canvas)
     panel.set_configuration(default_lane_width=2.8, direction=0)
-    panel.set_turn_radius_results(
-        radius_result,
-        None,
+    panel.set_turn_radius_measurements(
+        measurements,
+        (),
         dimensions_source="VIN PREVIEW 专属配置",
     )
     panel.radius_layer_check.setChecked(True)
@@ -72,14 +74,14 @@ def main() -> int:
     splitter.addWidget(panel)
     splitter.setSizes([1050, 390])
     window = QMainWindow()
-    window.setWindowTitle("Suntae 路径通行分析 0.2.0 — 发布视觉检查")
+    window.setWindowTitle(f"Suntae 路径通行分析 {__version__} — 发布视觉检查")
     window.setCentralWidget(splitter)
     window.resize(1440, 860)
     window.show()
     app.processEvents()
     canvas.fit_content()
     canvas.scale(2.0, 2.0)
-    display = canvas.to_display(Point2D(observation.pose.x, observation.pose.y))
+    display = canvas.to_display(Point2D(path[0].x, path[0].y))
     canvas.centerOn(display.x, display.y)
     app.processEvents()
     overview_saved = window.grab().save(str(output))
