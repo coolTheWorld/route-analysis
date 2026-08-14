@@ -217,15 +217,20 @@ class SchedulerClient:
         return response.status_code == 401 or code == 401
 
     @staticmethod
-    def _unwrap(response: ResponseLike, *, authentication: bool = False) -> object:
-        payload = SchedulerClient._payload(response)
+    def _unwrap(
+        response: ResponseLike,
+        *,
+        authentication: bool = False,
+        payload: Mapping[str, object] | None = None,
+    ) -> object:
+        parsed = SchedulerClient._payload(response) if payload is None else payload
         try:
             response.raise_for_status()
         except requests.RequestException as exc:
             error_type = AuthenticationError if authentication else ApiError
             message = "登录失败，请检查凭据和租户" if authentication else "调度后端请求失败"
             raise error_type(message) from exc
-        raw_code = payload.get("code", 0)
+        raw_code = parsed.get("code", 0)
         if not isinstance(raw_code, (str, int, float)):
             raise ApiError("调度后端响应 code 无效")
         try:
@@ -235,9 +240,9 @@ class SchedulerClient:
         if code != 0:
             if authentication or code == 401:
                 raise AuthenticationError("登录状态无效，请检查凭据和租户")
-            message = _text(payload.get("msg")) or "调度后端拒绝了查询"
+            message = _text(parsed.get("msg")) or "调度后端拒绝了查询"
             raise ApiError(message)
-        return payload.get("data")
+        return parsed.get("data")
 
     def login(self) -> None:
         self.settings.validate_credentials()
@@ -282,7 +287,7 @@ class SchedulerClient:
             )
             payload = self._payload(response)
             if not self._is_unauthorized(response, payload):
-                return self._unwrap(response)
+                return self._unwrap(response, payload=payload)
             if attempt == 1:
                 raise AuthenticationError("重新登录后仍未获得访问权限")
             self._access_token = None
