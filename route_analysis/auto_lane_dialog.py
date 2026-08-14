@@ -54,11 +54,11 @@ def run_auto_lane_dialog(
 
     dialog = AutoLaneDialog(
         paths,
+        parent=parent,
         default_width=default_width,
         maximum_deviation=maximum_deviation,
         last_mode=last_mode,
     )
-    dialog.setParent(parent)
     dialog.preview_changed.connect(preview_callback)
     dialog.refresh_preview()
     accepted = dialog.exec() == AutoLaneDialog.DialogCode.Accepted
@@ -111,11 +111,12 @@ class AutoLaneDialog(QDialog):
         self,
         paths: Mapping[str, Sequence[PosePoint]],
         *,
+        parent: QWidget | None = None,
         default_width: float,
         maximum_deviation: float,
         last_mode: BendMode,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self.setWindowTitle("按坐标路径生成车道")
         self.setMinimumWidth(500)
         self.setModal(True)
