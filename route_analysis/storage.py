@@ -155,6 +155,12 @@ class AppConfig:
             map_direction = _float_value(payload.get("map_direction", 0.0))
             if not math.isfinite(map_direction):
                 raise ValueError
+            generation_mode = str(payload.get("lane_generation_mode", "sharp"))
+            log_level = str(payload.get("log_level", "INFO")).upper()
+            if generation_mode not in {"sharp", "round", "bezier"}:
+                raise ValueError
+            if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+                raise ValueError
             return cls(
                 api_root=str(connection.get("api_root", "")),
                 tenant=str(connection.get("tenant", "suntae")),
@@ -182,8 +188,8 @@ class AppConfig:
                     ),
                 ),
                 snap_to_path=bool(payload.get("snap_to_path", True)),
-                lane_generation_mode=str(payload.get("lane_generation_mode", "sharp")),
-                log_level=str(payload.get("log_level", "INFO")).upper(),
+                lane_generation_mode=generation_mode,
+                log_level=log_level,
             )
         except (TypeError, ValueError) as exc:
             raise StorageError("配置文件包含无效数值") from exc

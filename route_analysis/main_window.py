@@ -332,6 +332,7 @@ class MainWindow(QMainWindow):
             self.canvas.set_lane_preview(None if result is None else result.lane)
 
         dialog.preview_changed.connect(preview_changed)
+        dialog._regenerate()
         accepted = dialog.exec() == AutoLaneDialog.DialogCode.Accepted
         self.canvas.set_lane_preview(None)
         result = dialog.generation_result
@@ -519,6 +520,15 @@ class MainWindow(QMainWindow):
             list(page.items),
         )
         self._update_navigation_header()
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "orders_loaded",
+            page_no=page.page_no,
+            page_size=page.page_size,
+            total=page.total,
+            order_ids=[item.id for item in page.items],
+        )
 
     def show_task_page(self, page: Page[TaskRecord]) -> None:
         self._navigation_level = "tasks"
@@ -531,6 +541,16 @@ class MainWindow(QMainWindow):
             list(page.items),
         )
         self._update_navigation_header()
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "tasks_loaded",
+            order_id=self._current_order.id if self._current_order else None,
+            page_no=page.page_no,
+            page_size=page.page_size,
+            total=page.total,
+            task_ids=[item.id for item in page.items],
+        )
 
     def show_commands(self, commands: tuple[CommandRecord, ...]) -> None:
         self._navigation_level = "commands"
@@ -541,6 +561,14 @@ class MainWindow(QMainWindow):
             list(commands),
         )
         self._update_navigation_header()
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "commands_loaded",
+            order_id=self._current_order.id if self._current_order else None,
+            task_id=self._current_task.id if self._current_task else None,
+            command_ids=[item.id for item in commands],
+        )
 
     def _update_navigation_header(self) -> None:
         parts = ["订单"]
@@ -682,6 +710,18 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"下发 {len(self._dispatched_path)} 点；实际 {len(self._actual_path)} 点；VIN {vin}"
         )
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "command_paths_loaded",
+            order_id=self._current_order.id if self._current_order else None,
+            task_id=self._current_task.id if self._current_task else None,
+            command_id=self._current_command.id if self._current_command else None,
+            map_id=self._lane_key[1] if self._lane_key else None,
+            vin=vin,
+            dispatched_points=len(self._dispatched_path),
+            actual_points=len(self._actual_path),
+        )
         self.analyze_now()
 
     def analyze_now(self) -> None:
@@ -801,6 +841,22 @@ class MainWindow(QMainWindow):
             return False
         self.canvas.mark_saved()
         self.status_label.setText(f"车道已保存：{path.name}")
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "lanes_saved",
+            server_id=self._lane_key[0],
+            map_id=self._lane_key[1],
+            lane_count=len(self.canvas.current_layout().lanes),
+            file=path,
+        )
+        log_event(
+            LOGGER,
+            logging.DEBUG,
+            "lanes_saved_full_layout",
+            configuration=self.config.to_dict(),
+            layout=self.canvas.current_layout().to_dict(),
+        )
         return True
 
     def _confirm_dirty(self) -> bool:
@@ -828,6 +884,17 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         source = Path(filename)
+        try:
+            import_body = source.read_text(encoding="utf-8")
+        except OSError:
+            import_body = None
+        log_event(
+            LOGGER,
+            logging.DEBUG,
+            "lane_import_full_file",
+            file=source,
+            body=import_body,
+        )
         try:
             preview = self._lane_repository.preview_import(
                 source,
@@ -863,6 +930,16 @@ class MainWindow(QMainWindow):
             return
         self.canvas.load_layout(layout)
         self.status_label.setText("车道已由导入文件替换")
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "lanes_imported_replacing_layout",
+            server_id=self._lane_key[0],
+            map_id=self._lane_key[1],
+            lane_count=len(layout.lanes),
+            source=source,
+            mismatches=preview.mismatches,
+        )
 
     def export_lanes(self) -> None:
         if self._lane_key is None:
@@ -884,6 +961,15 @@ class MainWindow(QMainWindow):
             self._show_error(str(exc))
             return
         self.status_label.setText(f"车道已导出：{destination.name}")
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "lanes_exported",
+            server_id=self._lane_key[0],
+            map_id=self._lane_key[1],
+            lane_count=len(self.canvas.current_layout().lanes),
+            destination=destination,
+        )
 
     def open_settings(self) -> None:
         dialog = SettingsDialog(self.config, self._profiles)
@@ -917,6 +1003,13 @@ class MainWindow(QMainWindow):
         self._apply_config()
         if self._logging_manager is not None:
             self._logging_manager.set_level(self.config.log_level)
+        log_event(
+            LOGGER,
+            logging.DEBUG,
+            "configuration_saved",
+            configuration=self.config.to_dict(),
+            vehicle_profiles=self._profiles,
+        )
         self._analysis_timer.start()
 
     def _direction_changed(self, radians: float) -> None:
