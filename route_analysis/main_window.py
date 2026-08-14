@@ -156,6 +156,8 @@ class MainWindow(QMainWindow):
         self._lane_key: tuple[str, str] | None = None
         self._dispatched_path: tuple[PosePoint, ...] = ()
         self._actual_path: tuple[PosePoint, ...] = ()
+        self._displayed_path_vin: str | None = None
+        self._displayed_path_command_id: int | None = None
         self._radius_states: dict[str, RadiusMeasurementState | None] = {
             "dispatched": None,
             "actual": None,
@@ -979,6 +981,10 @@ class MainWindow(QMainWindow):
         paths: tuple[tuple[PosePoint, ...], tuple[PosePoint, ...]],
     ) -> None:
         self._dispatched_path, self._actual_path = paths
+        self._displayed_path_vin = vin
+        self._displayed_path_command_id = (
+            self._current_command.id if self._current_command is not None else None
+        )
         try:
             dimensions = self._dimensions_for(vin)
         except ValueError as exc:
@@ -1005,9 +1011,14 @@ class MainWindow(QMainWindow):
         self.analyze_now()
 
     def analyze_now(self) -> None:
-        if self._current_command is None or self._lane_key is None:
+        if (
+            self._displayed_path_vin is None
+            or self._displayed_path_command_id is None
+            or self._lane_key is None
+        ):
             return
-        vin = self._current_command.vin or (self._current_task.vin if self._current_task else "")
+        vin = self._displayed_path_vin
+        command_id = self._displayed_path_command_id
         try:
             dimensions = self._dimensions_for(vin)
         except ValueError:
@@ -1047,7 +1058,7 @@ class MainWindow(QMainWindow):
                 LOGGER,
                 logging.INFO,
                 "path_analysis_completed",
-                command_id=self._current_command.id if self._current_command else None,
+                command_id=command_id,
                 map_id=self._lane_key[1] if self._lane_key else None,
                 vin=vin,
                 duration_ms=(time.perf_counter() - started) * 1000,
@@ -1243,6 +1254,8 @@ class MainWindow(QMainWindow):
             self._current_order = None
             self._current_task = None
             self._current_command = None
+            self._displayed_path_vin = None
+            self._displayed_path_command_id = None
             self.canvas.clear_paths()
             self._radius_states = {"dispatched": None, "actual": None}
             self._radius_generations["dispatched"] += 1

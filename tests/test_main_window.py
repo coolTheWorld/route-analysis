@@ -16,7 +16,7 @@ from route_analysis.api_client import (
 from route_analysis.auto_lane_dialog import AutoLaneDialog
 from route_analysis.logging_setup import configure_logging
 from route_analysis.main_window import MainWindow
-from route_analysis.models import PosePoint, VehicleDimensions
+from route_analysis.models import ClearanceStatus, Point2D, PosePoint, VehicleDimensions
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import AppConfig, ConfigRepository
 from route_analysis.turn_measurements import (
@@ -102,6 +102,54 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
     assert window.windowTitle().startswith("Suntae")
+
+
+def test_returning_to_tasks_keeps_displayed_paths_analyzable(qtbot: QtBot, tmp_path: Path) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: FakeClient(),
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+
+    window.refresh_current_level()
+    qtbot.waitUntil(lambda: window.navigation_level == "orders" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "commands" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
+    qtbot.waitUntil(lambda: window.canvas._results["dispatched"] is not None)
+    assert window.canvas._results["dispatched"].status is ClearanceStatus.UNAVAILABLE
+
+    window.go_back()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    assert window._current_command is None
+    assert window.canvas.path_point_counts == {"dispatched": 2, "actual": 2}
+
+    try:
+        window.canvas.add_lane(
+            [Point2D(-1, 0), Point2D(3, 0)],
+            width=3.5,
+            name="覆盖路径",
+        )
+        window.control_panel.analyze_requested.emit()
+
+        qtbot.waitUntil(
+            lambda: (
+                window.canvas._results["dispatched"] is not None
+                and window.canvas._results["dispatched"].analyzed_samples > 0
+            )
+        )
+        assert window.canvas._results["dispatched"].status is not ClearanceStatus.UNAVAILABLE
+    finally:
+        qtbot.waitUntil(lambda: not window._analysis_timer.isActive() and not window._workers)
+        window.canvas.mark_saved()
 
 
 def test_confirming_auto_lane_adds_once_and_persists_last_generation_mode(
