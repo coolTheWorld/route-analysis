@@ -10,11 +10,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Protocol, cast
 
-from PySide6.QtCore import QRegularExpression, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QRegularExpression, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QDesktopServices,
     QKeySequence,
     QRegularExpressionValidator,
 )
@@ -44,13 +43,14 @@ from route_analysis.api_client import (
     SchedulerClient,
     TaskRecord,
 )
-from route_analysis.auto_lane_dialog import AutoLaneDialog
+from route_analysis.auto_lane_dialog import log_auto_lane_selection, run_auto_lane_dialog
 from route_analysis.canvas import RouteCanvas
 from route_analysis.control_panel import ControlPanel
 from route_analysis.errors import RouteAnalysisError, StorageError
 from route_analysis.geometry import build_traversable_area
-from route_analysis.lane_generation import BendMode, LaneGenerationResult
+from route_analysis.lane_generation import BendMode
 from route_analysis.logging_setup import LoggingManager, LoggingState, log_event
+from route_analysis.logging_ui import add_log_menu
 from route_analysis.models import AnalysisResult, PosePoint, VehicleDimensions
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import (
@@ -275,23 +275,12 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self.open_settings)
         self.menuBar().addAction(settings_action)
 
-        help_menu = self.menuBar().addMenu("帮助")
-        open_log_directory = QAction("打开日志目录", self)
-        open_log_directory.triggered.connect(self._open_log_directory)
-        open_current_log = QAction("打开当前日志", self)
-        open_current_log.triggered.connect(self._open_current_log)
-        help_menu.addActions([open_log_directory, open_current_log])
-
-    def _log_file(self) -> Path:
-        if self._logging_manager is not None:
-            return self._logging_manager.current_file
-        return self._data_dir.with_name("log") / "route-analysis.log"
-
-    def _open_log_directory(self) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._log_file().parent)))
-
-    def _open_current_log(self) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._log_file())))
+        log_file = (
+            self._logging_manager.current_file
+            if self._logging_manager is not None
+            else self._data_dir.with_name("log") / "route-analysis.log"
+        )
+        add_log_menu(self.menuBar(), self, log_file)
 
     def _apply_logging_state(self, state: LoggingState) -> None:
         self.log_status_label.setText("" if state.available else "日志不可用")
@@ -318,7 +307,8 @@ class MainWindow(QMainWindow):
         if len(self._dispatched_path) < 2 and len(self._actual_path) < 2:
             self._show_error("当前命令没有可用于生成车道的路径坐标")
             return
-        dialog = AutoLaneDialog(
+        selection = run_auto_lane_dialog(
+            self,
             {
                 "dispatched": self._dispatched_path,
                 "actual": self._actual_path,
@@ -326,27 +316,22 @@ class MainWindow(QMainWindow):
             default_width=self.config.default_lane_width,
             maximum_deviation=self.config.analysis.lane_generation_deviation,
             last_mode=BendMode(self.config.lane_generation_mode),
+            preview_callback=lambda result: self.canvas.set_lane_preview(
+                None if result is None else result.lane
+            ),
         )
-
-        def preview_changed(result: LaneGenerationResult | None) -> None:
-            self.canvas.set_lane_preview(None if result is None else result.lane)
-
-        dialog.preview_changed.connect(preview_changed)
-        dialog.refresh_preview()
-        accepted = dialog.exec() == AutoLaneDialog.DialogCode.Accepted
-        self.canvas.set_lane_preview(None)
-        result = dialog.generation_result
-        if not accepted or result is None:
+        if selection is None:
             return
 
-        selected_source = str(dialog.source_combo.currentData())
+        result = selection.generation
+        selected_source = selection.source
         new_config = replace(
             self.config,
             analysis=replace(
                 self.config.analysis,
-                lane_generation_deviation=dialog.deviation_spin.value(),
+                lane_generation_deviation=selection.maximum_deviation,
             ),
-            lane_generation_mode=str(dialog.mode_combo.currentData()),
+            lane_generation_mode=selection.mode,
         )
         try:
             self._config_repository.save(new_config)
@@ -359,30 +344,10 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"已新增车道：{result.lane.name}；最大偏差 {metrics.maximum_deviation:.6f} m"
         )
-        log_event(
-            LOGGER,
-            logging.INFO,
-            "lane_generated",
-            source=selected_source,
-            lane_id=result.lane.id,
-            mode=self.config.lane_generation_mode,
-            width=result.lane.width,
-            maximum_deviation=metrics.maximum_deviation,
-            anchors=metrics.anchors,
-            segments=metrics.segments,
-            arc_failures=metrics.arc_failures,
-        )
         source_path = (
             self._dispatched_path if selected_source == "dispatched" else self._actual_path
         )
-        log_event(
-            LOGGER,
-            logging.DEBUG,
-            "lane_generation_full_source",
-            source=selected_source,
-            path=source_path,
-            generated_lane=result.lane,
-        )
+        log_auto_lane_selection(selection, source_path)
 
     def _search_orders(self) -> None:
         if self._navigation_level != "orders":

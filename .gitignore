@@ -15,8 +15,9 @@ build/
 dist/
 *.spec.local
 
-# Runtime data (includes plaintext credentials, tokens must never be persisted)
+# Runtime data (may include plaintext credentials and unredacted DEBUG logs)
 data/
+log/
 
 # Editors and OS
 .idea/
