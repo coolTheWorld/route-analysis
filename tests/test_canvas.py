@@ -2,7 +2,7 @@ import math
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGraphicsTextItem
+from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsTextItem
 from pytestqt.qtbot import QtBot
 
 from route_analysis.canvas import RouteCanvas
@@ -292,3 +292,91 @@ def test_manual_radius_mode_highlights_suggestions_selects_path_points_and_escap
     with qtbot.waitSignal(canvas.manual_radius_cancelled, timeout=1000) as cancelled:
         qtbot.keyClick(canvas, Qt.Key.Key_Escape)
     assert cancelled.args == ["dispatched"]
+
+
+def test_selected_path_point_highlight_is_independent_of_normal_path_layers(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_paths(
+        (PosePoint(0, 0, 0), PosePoint(2, 0, 0.5)),
+        (),
+        VehicleDimensions(1, 2, 1),
+    )
+    canvas.set_path_layer("dispatched", centerline=False, vehicles=False)
+
+    selected = canvas.select_path_point("dispatched", 1)
+
+    assert selected is True
+    assert canvas.selected_path_point == ("dispatched", 1)
+    assert any(
+        isinstance(item, QGraphicsEllipseItem) and item.zValue() == 55
+        for item in canvas.scene().items()
+    )
+    assert any(
+        isinstance(item, QGraphicsPolygonItem) and item.zValue() == 54
+        for item in canvas.scene().items()
+    )
+
+
+def test_selected_missing_yaw_point_only_draws_center_marker(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_paths((PosePoint(1, 2, None),), (), VehicleDimensions(1, 2, 1))
+
+    canvas.select_path_point("dispatched", 0)
+
+    assert any(
+        isinstance(item, QGraphicsEllipseItem) and item.zValue() == 55
+        for item in canvas.scene().items()
+    )
+    assert not any(
+        isinstance(item, QGraphicsPolygonItem) and item.zValue() == 54
+        for item in canvas.scene().items()
+    )
+
+
+def test_selecting_offscreen_point_centers_without_changing_zoom(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_paths((PosePoint(0, 0, 0),), (), VehicleDimensions(1, 1, 1))
+    canvas.centerOn(100, 100)
+    scale_before = (canvas.transform().m11(), canvas.transform().m22())
+
+    canvas.select_path_point("dispatched", 0)
+
+    viewport_point = canvas.mapFromScene(0, 0)
+    assert canvas.viewport().rect().contains(viewport_point)
+    assert (canvas.transform().m11(), canvas.transform().m22()) == scale_before
+
+
+def test_map_click_uses_active_path_and_cycles_overlapping_source_indices(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_paths(
+        (PosePoint(0, 0, 0), PosePoint(0, 0, 0.2)),
+        (PosePoint(0, 0, 0.4),),
+        VehicleDimensions(1, 1, 1),
+        source_indices={"dispatched": (2, 5), "actual": (9,)},
+    )
+    point = canvas.mapFromScene(0, 0)
+
+    with qtbot.waitSignal(canvas.path_point_selected, timeout=1000) as first:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    with qtbot.waitSignal(canvas.path_point_selected, timeout=1000) as second:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    assert first.args == ["dispatched", 2]
+    assert second.args == ["dispatched", 5]
+
+    canvas.set_active_path("actual")
+    with qtbot.waitSignal(canvas.path_point_selected, timeout=1000) as actual:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert actual.args == ["actual", 9]
