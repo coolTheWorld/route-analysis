@@ -11,6 +11,7 @@ app / main_window
 ├── settings_dialog ─────────────┐
 ├── api_client ── parsing        │
 ├── canvas / control_panel       │
+├── path_details_panel           │
 │   ├── geometry                 │
 │   ├── lane_generation          │
 │   ├── turn_radius              │
@@ -24,7 +25,7 @@ app / main_window
                          runtime data/ + log/
 ```
 
-- `models.py`：不可变路径姿态、车辆参数、分析结果，以及可编辑车道对象。
+- `models.py`：不可变路径姿态、保留原始 JSON 的命令/点位数据、车辆参数、分析结果，以及可编辑车道对象。
 - `geometry.py`：车辆矩形、yaw 最短角插值、圆弧/贝塞尔离散与真实长度、车道变换、缓冲与多车道并集。
 - `lane_generation.py`：路径去重/简化、尖角/真实圆弧/分段贝塞尔生成、偏差统计及相切圆弧半径编辑。
 - `turn_radius.py`：转弯区间、累计 yaw、整弯等效旋转中心、前轴中心和四角固定半径。
@@ -32,11 +33,12 @@ app / main_window
 - `radius_graphics.py`：已选测量的路径区间、端点车辆、等效圆心、五条半径线和五条圆弧轨迹。
 - `analysis.py`：对路径做位置/yaw 双约束采样并输出净距与越界结果。
 - `api_client.py`：唯一 HTTP 边界，只暴露必要查询；负责认证、单次重登、分页和响应校验。
-- `parsing.py`：解析 `AgvTaskCommand.positionList`，明确不以 `roadYaw` 补全 yaw。
+- `parsing.py`：解析 `AgvTaskCommand.positionList`，保留完整命令和每个原始点位；字段异常按行记录，明确不以 `roadYaw` 补全 yaw。
 - `storage.py`：版本化 JSON、服务器/mapId 隔离、原子替换、备份和导入校验。
 - `canvas.py`：米制 QGraphicsView、路径/车体/车道绘制、方向变换、鼠标编辑和撤销栈。
+- `path_details_panel.py`：按需渲染的下发/实际点位表格、序号跳转、完整命令/点位 JSON、标签选择记忆及单来源错误/重试状态。
 - `control_panel.py`：图层开关、车道属性、锚点/圆弧/贝塞尔数值编辑、通行结果和四角半径明细。
-- `main_window.py`：层级导航、后台查询、车道上下文切换、脏状态协议和后台分析。
+- `main_window.py`：层级导航、串行且独立的双来源路径查询、点位与画布双向选择、车道上下文切换、脏状态协议和后台分析。
 - `logging_setup.py`：UTF-8 JSON 事件、关联 ID、每日/容量混合轮转、保留策略和非阻断故障恢复。
 - `workers.py`：线程池适配器，只向 UI 传递简短可恢复错误；完整异常堆栈写入本地日志。
 
@@ -50,6 +52,12 @@ y_display = x·sin(θ) + y·cos(θ)
 ```
 
 鼠标编辑先用逆旋转还原原始坐标再写入模型。因此改变地图方向不会改写路径或车道 JSON。
+
+## 命令点位数据边界
+
+API 客户端返回 `CommandPathData`，同时保留解析后的完整业务命令、按来源顺序排列的 `PathPointData`，以及可供几何模块使用的有效 `PosePoint` 投影。点位表格始终使用来源记录；画布、通行分析和转弯半径只接收 X/Y 有限的投影，并通过 `pose_source_indices` 把地图选择还原为原始序号。这样无效单点不会阻断完整命令检查，也不会被错误绘制。
+
+下发和实际路径使用同一个单线程专用请求池依次查询，避免共享 HTTP Session 并发访问；每个来源拥有独立加载、错误和重试状态。代次编号阻止旧命令的迟到结果覆盖当前命令。
 
 ## 车辆包络
 

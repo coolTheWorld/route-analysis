@@ -15,6 +15,8 @@ from route_analysis.canvas import RouteCanvas
 from route_analysis.control_panel import ControlPanel
 from route_analysis.lane_generation import BendMode, generate_lane
 from route_analysis.models import Point2D, PosePoint, VehicleDimensions
+from route_analysis.parsing import parse_command_details
+from route_analysis.path_details_panel import PathDetailsPanel
 from route_analysis.storage import LaneLayout
 from route_analysis.theme import APPLICATION_STYLESHEET
 from route_analysis.turn_measurements import (
@@ -89,7 +91,50 @@ def main() -> int:
     app.processEvents()
     radius_output = output.with_name(f"{output.stem}-radius{output.suffix}")
     radius_saved = window.grab().save(str(radius_output))
-    return 0 if overview_saved and radius_saved else 1
+
+    point_details = parse_command_details(
+        {
+            "commandId": 9063,
+            "vin": "VIN-PREVIEW",
+            "positionList": [
+                {"x": 0, "y": 0, "yaw": 0, "gear": "D", "speed": 0.5},
+                {"x": 2, "y": 0.5, "yaw": 0.35, "gear": "D", "speed": 0.4},
+                {"x": 3.5, "y": 2, "yaw": None, "gear": "R"},
+                {"x": "invalid", "y": 4, "yaw": 1.2, "gear": "R"},
+            ],
+        }
+    )
+    point_canvas = RouteCanvas()
+    point_canvas.set_paths(
+        point_details.poses,
+        (),
+        dimensions,
+        source_indices={"dispatched": point_details.pose_source_indices, "actual": ()},
+    )
+    point_panel = PathDetailsPanel()
+    point_panel.begin_command()
+    point_panel.set_source_document("dispatched", point_details)
+    point_panel.set_source_document("actual", parse_command_details({"positionList": []}))
+    point_panel.point_selected.connect(point_canvas.select_path_point)
+    point_canvas.path_point_selected.connect(point_panel.select_point)
+    point_panel.select_point("dispatched", 1, emit_signal=True)
+    point_splitter = QSplitter(Qt.Orientation.Horizontal)
+    point_splitter.addWidget(point_panel)
+    point_splitter.addWidget(point_canvas)
+    point_splitter.setSizes([480, 960])
+    point_window = QMainWindow()
+    point_window.setWindowTitle(
+        f"Suntae 路径通行分析 {__version__} — 命令点位视觉检查"
+    )
+    point_window.setCentralWidget(point_splitter)
+    point_window.resize(1440, 860)
+    point_window.show()
+    app.processEvents()
+    point_canvas.fit_content()
+    app.processEvents()
+    point_output = output.with_name(f"{output.stem}-points{output.suffix}")
+    points_saved = point_window.grab().save(str(point_output))
+    return 0 if overview_saved and radius_saved and points_saved else 1
 
 
 if __name__ == "__main__":
