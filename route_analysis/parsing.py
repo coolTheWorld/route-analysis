@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping
 
 from route_analysis.errors import DataContractError
-from route_analysis.models import PosePoint
+from route_analysis.models import CommandPathData, PathPointData, PosePoint
 
 
 def _number(value: object, field: str, index: int, *, optional: bool = False) -> float | None:
@@ -24,9 +24,7 @@ def _number(value: object, field: str, index: int, *, optional: bool = False) ->
     return result
 
 
-def parse_command_path(payload: object) -> tuple[PosePoint, ...]:
-    """Parse an ``AgvTaskCommand`` or its JSON string into validated poses."""
-
+def _decode_command(payload: object) -> Mapping[str, object]:
     decoded = payload
     if isinstance(payload, str):
         try:
@@ -35,17 +33,68 @@ def parse_command_path(payload: object) -> tuple[PosePoint, ...]:
             raise DataContractError("命令路径不是有效 JSON") from exc
     if not isinstance(decoded, Mapping):
         raise DataContractError("命令路径根节点必须是对象")
+    return decoded
+
+
+def _point_number(
+    value: object,
+    field: str,
+    index: int,
+    *,
+    optional: bool = False,
+) -> tuple[float | None, str | None]:
+    try:
+        return _number(value, field, index, optional=optional), None
+    except DataContractError as exc:
+        return None, str(exc)
+
+
+def parse_command_details(payload: object) -> CommandPathData:
+    """Parse a command while retaining every raw source point, including invalid rows."""
+
+    decoded = _decode_command(payload)
     raw_points = decoded.get("positionList")
     if not isinstance(raw_points, list):
         raise DataContractError("命令路径 positionList 必须是数组")
 
-    points: list[PosePoint] = []
+    points: list[PathPointData] = []
     for index, raw_point in enumerate(raw_points):
         if not isinstance(raw_point, Mapping):
-            raise DataContractError(f"路径点 {index} 必须是对象")
-        x = _number(raw_point.get("x"), "x", index)
-        y = _number(raw_point.get("y"), "y", index)
-        yaw = _number(raw_point.get("yaw"), "yaw", index, optional=True)
-        assert x is not None and y is not None
-        points.append(PosePoint(x, y, yaw))
-    return tuple(points)
+            points.append(
+                PathPointData(
+                    index,
+                    raw_point,
+                    None,
+                    None,
+                    None,
+                    None,
+                    (f"路径点 {index} 必须是对象",),
+                )
+            )
+            continue
+        x, x_error = _point_number(raw_point.get("x"), "x", index)
+        y, y_error = _point_number(raw_point.get("y"), "y", index)
+        yaw, yaw_error = _point_number(raw_point.get("yaw"), "yaw", index, optional=True)
+        errors = tuple(error for error in (x_error, y_error, yaw_error) if error is not None)
+        points.append(
+            PathPointData(
+                index,
+                dict(raw_point),
+                x,
+                y,
+                yaw,
+                raw_point.get("gear"),
+                errors,
+            )
+        )
+    return CommandPathData(dict(decoded), tuple(points))
+
+
+def parse_command_path(payload: object) -> tuple[PosePoint, ...]:
+    """Parse an ``AgvTaskCommand`` into strictly validated geometry poses."""
+
+    details = parse_command_details(payload)
+    first_error = next((error for point in details.points for error in point.errors), None)
+    if first_error is not None:
+        raise DataContractError(first_error)
+    return details.poses

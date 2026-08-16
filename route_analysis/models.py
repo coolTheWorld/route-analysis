@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from math import isfinite
@@ -34,6 +35,61 @@ class PosePoint:
             raise ValueError("pose coordinates must be finite")
         if self.yaw is not None and not isfinite(self.yaw):
             raise ValueError("pose yaw must be finite when present")
+
+
+@dataclass(frozen=True, slots=True)
+class PathPointData:
+    """One source ``positionList`` entry with its raw JSON and optional valid pose."""
+
+    source_index: int
+    raw: object
+    x: float | None
+    y: float | None
+    yaw: float | None
+    gear: object | None
+    errors: tuple[str, ...] = ()
+
+    @property
+    def pose(self) -> PosePoint | None:
+        if self.x is None or self.y is None:
+            return None
+        return PosePoint(self.x, self.y, self.yaw)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandPathData:
+    """Complete business JSON plus inspectable source points and valid geometry poses."""
+
+    raw_command: Mapping[str, object] | None
+    points: tuple[PathPointData, ...]
+
+    @classmethod
+    def empty(cls) -> CommandPathData:
+        return cls(None, ())
+
+    @classmethod
+    def from_poses(cls, poses: tuple[PosePoint, ...]) -> CommandPathData:
+        raw_points = tuple(
+            {
+                "x": pose.x,
+                "y": pose.y,
+                "yaw": pose.yaw,
+            }
+            for pose in poses
+        )
+        points = tuple(
+            PathPointData(index, raw, pose.x, pose.y, pose.yaw, None)
+            for index, (pose, raw) in enumerate(zip(poses, raw_points, strict=True))
+        )
+        return cls({"positionList": list(raw_points)}, points)
+
+    @property
+    def poses(self) -> tuple[PosePoint, ...]:
+        return tuple(pose for point in self.points if (pose := point.pose) is not None)
+
+    @property
+    def pose_source_indices(self) -> tuple[int, ...]:
+        return tuple(point.source_index for point in self.points if point.pose is not None)
 
 
 @dataclass(frozen=True, slots=True)

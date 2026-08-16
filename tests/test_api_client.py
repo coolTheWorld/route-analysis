@@ -120,7 +120,14 @@ def test_client_uses_only_expected_read_endpoints_for_navigation_and_paths() -> 
             ok({"accessToken": "token"}),
             ok({"list": [{"id": 11, "orderId": 9, "vin": "V1", "mapId": 3}], "total": 1}),
             ok([{"id": 22, "orderTaskId": 11, "vin": "V1", "mapId": 3}]),
-            ok({"commandStr": '{"positionList":[{"x":1,"y":2,"yaw":0.1}]}'}),
+            ok(
+                {
+                    "commandStr": (
+                        '{"commandId":22,"positionList":'
+                        '[{"x":1,"y":2,"yaw":0.1,"gear":"D","speed":0.5}]}'
+                    )
+                }
+            ),
             ok({"commandStr": '{"positionList":[{"x":2,"y":3,"yaw":0.2}]}'}),
         ]
     )
@@ -133,8 +140,18 @@ def test_client_uses_only_expected_read_endpoints_for_navigation_and_paths() -> 
 
     assert task_page.items[0].vin == "V1"
     assert commands[0].id == 22
-    assert dispatched[0].x == 1
-    assert actual[0].x == 2
+    assert dispatched.poses[0].x == 1
+    assert dispatched.points[0].gear == "D"
+    assert dispatched.points[0].raw == {
+        "x": 1,
+        "y": 2,
+        "yaw": 0.1,
+        "gear": "D",
+        "speed": 0.5,
+    }
+    assert dispatched.raw_command is not None
+    assert dispatched.raw_command["commandId"] == 22
+    assert actual.poses[0].x == 2
     business_calls = session.calls[2:]
     assert [call["method"] for call in business_calls] == ["GET"] * 4
     assert [call["url"].split("/admin-api")[-1] for call in business_calls] == [
