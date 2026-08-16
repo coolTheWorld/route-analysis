@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 from uuid import uuid4
@@ -96,6 +96,7 @@ class RouteCanvas(QGraphicsView):
     drawing_state_changed = Signal(bool)
     radius_endpoint_selected = Signal(str, int)
     manual_radius_cancelled = Signal(str)
+    path_point_selected = Signal(str, int)
 
     PATH_COLORS: ClassVar[dict[str, QColor]] = {
         "dispatched": QColor("#2474d8"),
@@ -120,6 +121,13 @@ class RouteCanvas(QGraphicsView):
         self._layout = LaneLayout("0000000000000000", "0", [])
         self._map_direction = 0.0
         self._paths: dict[str, tuple[PosePoint, ...]] = {"dispatched": (), "actual": ()}
+        self._path_source_indices: dict[str, tuple[int, ...]] = {
+            "dispatched": (),
+            "actual": (),
+        }
+        self._active_path_name = "dispatched"
+        self._selected_path_point: tuple[str, int] | None = None
+        self._last_path_click: tuple[str, tuple[int, ...], Point2D, int] | None = None
         self._dimensions: VehicleDimensions | None = None
         self._bezier_tolerance = 0.02
         self._miter_limit = 4.0
@@ -169,6 +177,10 @@ class RouteCanvas(QGraphicsView):
     @property
     def selected_lane_id(self) -> str | None:
         return self._selected_lane_id
+
+    @property
+    def selected_path_point(self) -> tuple[str, int] | None:
+        return self._selected_path_point
 
     def current_layout(self) -> LaneLayout:
         return copy.deepcopy(self._layout)
@@ -245,10 +257,24 @@ class RouteCanvas(QGraphicsView):
         dispatched: Iterable[PosePoint],
         actual: Iterable[PosePoint],
         dimensions: VehicleDimensions,
+        *,
+        source_indices: Mapping[str, Iterable[int]] | None = None,
     ) -> None:
         self._paths = {"dispatched": tuple(dispatched), "actual": tuple(actual)}
+        self._path_source_indices = {}
+        for name, points in self._paths.items():
+            indices = tuple(
+                range(len(points))
+                if source_indices is None
+                else source_indices.get(name, range(len(points)))
+            )
+            if len(indices) != len(points) or len(set(indices)) != len(indices):
+                raise ValueError(f"source indices do not match {name} path")
+            self._path_source_indices[name] = indices
         self._dimensions = dimensions
         self._results = {"dispatched": None, "actual": None}
+        self._selected_path_point = None
+        self._last_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
         self._manual_radius_suggestions.clear()
@@ -263,13 +289,58 @@ class RouteCanvas(QGraphicsView):
 
     def clear_paths(self) -> None:
         self._paths = {"dispatched": (), "actual": ()}
+        self._path_source_indices = {"dispatched": (), "actual": ()}
         self._results = {"dispatched": None, "actual": None}
+        self._selected_path_point = None
+        self._last_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
         self._manual_radius_suggestions.clear()
         self._manual_radius_start = None
         self._rebuild_scene()
         self.fit_content()
+
+    def set_active_path(self, path_name: str) -> None:
+        if path_name not in self._paths:
+            raise ValueError(f"unknown path: {path_name}")
+        self._active_path_name = path_name
+        self._last_path_click = None
+
+    def select_path_point(
+        self,
+        path_name: str,
+        source_index: int,
+        *,
+        ensure_visible: bool = True,
+    ) -> bool:
+        if path_name not in self._paths:
+            raise ValueError(f"unknown path: {path_name}")
+        internal_index = self._internal_index_for_source(path_name, source_index)
+        if internal_index is None:
+            return False
+        self._selected_path_point = (path_name, source_index)
+        self._last_path_click = None
+        self._rebuild_scene()
+        if ensure_visible:
+            pose = self._paths[path_name][internal_index]
+            display = self.to_display(Point2D(pose.x, pose.y))
+            viewport_position = self.mapFromScene(display.x, display.y)
+            if not self.viewport().rect().adjusted(8, 8, -8, -8).contains(viewport_position):
+                self.centerOn(display.x, display.y)
+        return True
+
+    def clear_path_point_selection(self) -> None:
+        if self._selected_path_point is None:
+            return
+        self._selected_path_point = None
+        self._last_path_click = None
+        self._rebuild_scene()
+
+    def _internal_index_for_source(self, path_name: str, source_index: int) -> int | None:
+        try:
+            return self._path_source_indices[path_name].index(source_index)
+        except ValueError:
+            return None
 
     def set_lane_preview(self, lane: Lane | None) -> None:
         """Show a non-persistent generated lane overlay without touching undo history."""
@@ -621,6 +692,31 @@ class RouteCanvas(QGraphicsView):
             ),
         )
 
+    def _cycle_path_candidate(
+        self,
+        path_name: str,
+        candidates: list[int],
+        raw: Point2D,
+    ) -> int:
+        ordered = tuple(sorted(candidates))
+        threshold = 5 / max(abs(self.transform().m11()), 1)
+        if self._last_path_click is not None:
+            previous_path, previous_candidates, previous_raw, previous_index = (
+                self._last_path_click
+            )
+            if (
+                previous_path == path_name
+                and previous_candidates == ordered
+                and math.hypot(previous_raw.x - raw.x, previous_raw.y - raw.y) <= threshold
+            ):
+                position = ordered.index(previous_index)
+                selected = ordered[(position + 1) % len(ordered)]
+                self._last_path_click = (path_name, ordered, raw, selected)
+                return selected
+        selected = candidates[0]
+        self._last_path_click = (path_name, ordered, raw, selected)
+        return selected
+
     def _choose_path_candidate(
         self,
         path_name: str,
@@ -712,6 +808,20 @@ class RouteCanvas(QGraphicsView):
                 if not self._draft_points or self._draft_points[-1] != snapped:
                     self._draft_points.append(snapped)
                 self._rebuild_scene()
+                return
+            candidates = self._path_point_candidates(self._active_path_name, raw)
+            if candidates:
+                internal_index = self._cycle_path_candidate(
+                    self._active_path_name,
+                    candidates,
+                    raw,
+                )
+                source_index = self._path_source_indices[self._active_path_name][
+                    internal_index
+                ]
+                self._selected_path_point = (self._active_path_name, source_index)
+                self._rebuild_scene()
+                self.path_point_selected.emit(self._active_path_name, source_index)
                 return
             target = self._hit_test(raw)
             if target is not None:
@@ -1035,6 +1145,34 @@ class RouteCanvas(QGraphicsView):
                 QBrush(QColor("#ffffff")),
             ).setZValue(52)
 
+    def _add_selected_path_point_graphics(self) -> None:
+        if self._selected_path_point is None:
+            return
+        path_name, source_index = self._selected_path_point
+        internal_index = self._internal_index_for_source(path_name, source_index)
+        if internal_index is None or self._dimensions is None:
+            return
+        pose = self._paths[path_name][internal_index]
+        display = self.to_display(Point2D(pose.x, pose.y))
+        highlight = QColor("#f4b400")
+        if pose.yaw is not None:
+            fill = QColor(highlight)
+            fill.setAlpha(55)
+            polygon = vehicle_polygon(pose, self._dimensions)
+            self.scene().addPolygon(
+                self._display_polygon(polygon.exterior.coords),
+                self._cosmetic_pen(highlight, 3),
+                QBrush(fill),
+            ).setZValue(54)
+        self.scene().addEllipse(
+            display.x - 0.16,
+            display.y - 0.16,
+            0.32,
+            0.32,
+            self._cosmetic_pen(QColor("#4a3600"), 2.5),
+            QBrush(highlight),
+        ).setZValue(55)
+
     def _add_turn_radius_graphics(self) -> None:
         if (
             not self._turn_radius_layer
@@ -1062,6 +1200,7 @@ class RouteCanvas(QGraphicsView):
             self._add_lane_graphics(self._lane_preview, preview=True)
         self._add_route_graphics("dispatched")
         self._add_route_graphics("actual")
+        self._add_selected_path_point_graphics()
         self._add_manual_radius_graphics()
         self._add_turn_radius_graphics()
         if self._drawing:
