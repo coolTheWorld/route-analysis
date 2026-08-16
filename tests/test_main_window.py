@@ -14,9 +14,17 @@ from route_analysis.api_client import (
     TaskRecord,
 )
 from route_analysis.auto_lane_dialog import AutoLaneDialog
+from route_analysis.errors import ApiError
 from route_analysis.logging_setup import configure_logging
 from route_analysis.main_window import MainWindow
-from route_analysis.models import ClearanceStatus, Point2D, PosePoint, VehicleDimensions
+from route_analysis.models import (
+    ClearanceStatus,
+    CommandPathData,
+    Point2D,
+    PosePoint,
+    VehicleDimensions,
+)
+from route_analysis.parsing import parse_command_details
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import AppConfig, ConfigRepository
 from route_analysis.turn_measurements import (
@@ -53,11 +61,39 @@ class FakeClient:
     def list_commands(self, *, task_id: int) -> tuple[CommandRecord, ...]:
         return (CommandRecord(9063, task_id, "VIN-1", 7, "完成", "MOVE", {"id": 9063}),)
 
-    def get_dispatched_path(self, *, command_id: int) -> tuple[PosePoint, ...]:
-        return (PosePoint(0, 0, 0), PosePoint(2, 0, 0))
+    def get_dispatched_path(self, *, command_id: int) -> CommandPathData:
+        return parse_command_details(
+            {
+                "commandId": command_id,
+                "positionList": [
+                    {"x": 0, "y": 0, "yaw": 0, "gear": "D"},
+                    {"x": 2, "y": 0, "yaw": 0, "gear": "D"},
+                ],
+            }
+        )
 
-    def get_actual_path(self, *, command_id: int, vin: str) -> tuple[PosePoint, ...]:
-        return (PosePoint(0, 0.1, 0), PosePoint(2, 0.1, 0))
+    def get_actual_path(self, *, command_id: int, vin: str) -> CommandPathData:
+        return parse_command_details(
+            {
+                "commandId": command_id,
+                "vin": vin,
+                "positionList": [
+                    {"x": 0, "y": 0.1, "yaw": 0, "gear": "D"},
+                    {"x": 2, "y": 0.1, "yaw": 0, "gear": "R"},
+                ],
+            }
+        )
+
+
+class RetryActualClient(FakeClient):
+    def __init__(self) -> None:
+        self.actual_calls = 0
+
+    def get_actual_path(self, *, command_id: int, vin: str) -> CommandPathData:
+        self.actual_calls += 1
+        if self.actual_calls == 1:
+            raise ApiError("实际路径接口暂时不可用")
+        return super().get_actual_path(command_id=command_id, vin=vin)
 
 
 def make_config(data_dir: Path) -> AppConfig:
@@ -102,6 +138,74 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
     assert window.windowTitle().startswith("Suntae")
+
+
+def test_command_points_show_raw_json_and_select_canvas_both_directions(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: FakeClient(),
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+
+    window.refresh_current_level()
+    qtbot.waitUntil(lambda: window.table.rowCount() == 1)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    window.activate_selected()
+    qtbot.waitUntil(
+        lambda: window.navigation_level == "commands" and window.table.rowCount() == 1
+    )
+    window.activate_selected()
+
+    qtbot.waitUntil(lambda: window.path_details.models["dispatched"].rowCount() == 2)
+    assert not window.path_details.isHidden()
+    assert '"commandId": 9063' in window.path_details.command_json_editor.toPlainText()
+
+    window.path_details.tables["dispatched"].selectRow(1)
+    assert window.canvas.selected_path_point == ("dispatched", 1)
+    assert '"gear": "D"' in window.path_details.point_json_editor.toPlainText()
+
+    window.path_details.source_tabs.setCurrentIndex(1)
+    window.canvas.path_point_selected.emit("actual", 1)
+    assert window.path_details.tables["actual"].currentIndex().row() == 1
+    assert '"gear": "R"' in window.path_details.point_json_editor.toPlainText()
+
+
+def test_path_sources_fail_independently_and_actual_can_retry(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    make_config(tmp_path)
+    client = RetryActualClient()
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: client,
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+
+    window.refresh_current_level()
+    qtbot.waitUntil(lambda: window.table.rowCount() == 1)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    window.activate_selected()
+    qtbot.waitUntil(
+        lambda: window.navigation_level == "commands" and window.table.rowCount() == 1
+    )
+    window.activate_selected()
+
+    qtbot.waitUntil(lambda: not window.path_details.retry_buttons["actual"].isHidden())
+    assert window.path_details.models["dispatched"].rowCount() == 2
+    assert window.path_details.models["actual"].rowCount() == 0
+
+    window.path_details.retry_buttons["actual"].click()
+
+    qtbot.waitUntil(lambda: window.path_details.models["actual"].rowCount() == 2)
+    assert window.path_details.retry_buttons["actual"].isHidden()
+    assert client.actual_calls == 2
 
 
 def test_returning_to_tasks_keeps_displayed_paths_analyzable(qtbot: QtBot, tmp_path: Path) -> None:
@@ -250,7 +354,10 @@ def test_saving_changed_vehicle_dimensions_refreshes_canvas_vehicle_frames(
         PosePoint(5 * math.cos(angle), 5 * math.sin(angle), angle + math.pi / 2)
         for angle in (index * math.pi / 40 for index in range(21))
     )
-    window._show_paths("VIN-1", (path, ()))
+    window._show_paths(
+        "VIN-1",
+        (CommandPathData.from_poses(path), CommandPathData.empty()),
+    )
     state = window._radius_states["dispatched"]
     assert state is not None
     state.add_manual(0, 20)
@@ -317,7 +424,10 @@ def test_automatic_and_manual_radius_measurements_are_saved_locally(
         for angle in (index * math.pi / 40 for index in range(21))
     )
 
-    window._show_paths("VIN-1", (path, ()))
+    window._show_paths(
+        "VIN-1",
+        (CommandPathData.from_poses(path), CommandPathData.empty()),
+    )
     window.control_panel.radius_auto_buttons["dispatched"].click()
 
     tree = window.control_panel.radius_trees["dispatched"]
