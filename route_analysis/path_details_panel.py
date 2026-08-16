@@ -332,7 +332,7 @@ class PathDetailsPanel(QFrame):
         tab_index = self.SOURCE_ORDER.index(path_name)
         if self.source_tabs.currentIndex() != tab_index:
             self.source_tabs.setCurrentIndex(tab_index)
-        self._suppress_selection_signal = not emit_signal
+        self._suppress_selection_signal = True
         try:
             index = page.model.index(row, 0)
             page.table.setCurrentIndex(index)

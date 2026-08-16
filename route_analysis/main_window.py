@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from route_analysis.analysis import analyze_path
@@ -53,7 +54,13 @@ from route_analysis.geometry import build_traversable_area
 from route_analysis.lane_generation import BendMode
 from route_analysis.logging_setup import LoggingManager, LoggingState, log_event
 from route_analysis.logging_ui import add_log_menu
-from route_analysis.models import AnalysisResult, PosePoint, VehicleDimensions
+from route_analysis.models import (
+    AnalysisResult,
+    CommandPathData,
+    PosePoint,
+    VehicleDimensions,
+)
+from route_analysis.path_details_panel import PathDetailsPanel
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import (
     ConfigRepository,
@@ -95,9 +102,9 @@ class SchedulerApi(Protocol):
 
     def list_commands(self, *, task_id: int) -> tuple[CommandRecord, ...]: ...
 
-    def get_dispatched_path(self, *, command_id: int) -> tuple[PosePoint, ...]: ...
+    def get_dispatched_path(self, *, command_id: int) -> CommandPathData: ...
 
-    def get_actual_path(self, *, command_id: int, vin: str) -> tuple[PosePoint, ...]: ...
+    def get_actual_path(self, *, command_id: int, vin: str) -> CommandPathData: ...
 
 
 Record = OrderRecord | TaskRecord | CommandRecord
@@ -133,6 +140,8 @@ class MainWindow(QMainWindow):
             self._client = factory(self.config.connection())
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(2)
+        self._path_pool = QThreadPool(self)
+        self._path_pool.setMaxThreadCount(1)
         self._analysis_pool = QThreadPool(self)
         self._analysis_pool.setMaxThreadCount(1)
         self._radius_pool = QThreadPool(self)
@@ -156,6 +165,12 @@ class MainWindow(QMainWindow):
         self._lane_key: tuple[str, str] | None = None
         self._dispatched_path: tuple[PosePoint, ...] = ()
         self._actual_path: tuple[PosePoint, ...] = ()
+        self._path_documents = {
+            "dispatched": CommandPathData.empty(),
+            "actual": CommandPathData.empty(),
+        }
+        self._path_load_generation = 0
+        self._pending_path_loads: set[tuple[int, str]] = set()
         self._displayed_path_vin: str | None = None
         self._displayed_path_command_id: int | None = None
         self._radius_states: dict[str, RadiusMeasurementState | None] = {
@@ -216,6 +231,10 @@ class MainWindow(QMainWindow):
         self.control_panel.radius_delete_requested.connect(self._delete_radius_measurement)
         self.control_panel.radius_rename_requested.connect(self._rename_radius_measurement)
         self.canvas.radius_endpoint_selected.connect(self._radius_endpoint_selected)
+        self.path_details.point_selected.connect(self._path_detail_selected)
+        self.path_details.active_path_changed.connect(self._active_path_changed)
+        self.path_details.retry_requested.connect(self._retry_path_source)
+        self.canvas.path_point_selected.connect(self._canvas_path_point_selected)
         self.canvas.manual_radius_cancelled.connect(
             lambda _path: self._finish_manual_radius()
         )
@@ -237,8 +256,8 @@ class MainWindow(QMainWindow):
     def _build_navigation_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("navigationPanel")
-        panel.setMinimumWidth(300)
-        panel.setMaximumWidth(460)
+        panel.setMinimumWidth(360)
+        panel.setMaximumWidth(620)
         layout = QVBoxLayout(panel)
         header = QHBoxLayout()
         self.back_button = QPushButton("← 返回")
@@ -262,6 +281,10 @@ class MainWindow(QMainWindow):
         search.addWidget(self.search_button)
         layout.addLayout(search)
 
+        navigation_table_panel = QWidget()
+        navigation_table_layout = QVBoxLayout(navigation_table_panel)
+        navigation_table_layout.setContentsMargins(0, 0, 0, 0)
+
         self.table = QTableWidget()
         self.table.setAccessibleName("订单任务命令列表")
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -272,7 +295,7 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.itemDoubleClicked.connect(lambda _item: self.activate_selected())
         self.table.itemActivated.connect(lambda _item: self.activate_selected())
-        layout.addWidget(self.table, 1)
+        navigation_table_layout.addWidget(self.table, 1)
 
         pager = QHBoxLayout()
         self.previous_button = QPushButton("上一页")
@@ -283,7 +306,17 @@ class MainWindow(QMainWindow):
         pager.addWidget(self.previous_button)
         pager.addWidget(self.page_label, 1, Qt.AlignmentFlag.AlignCenter)
         pager.addWidget(self.next_button)
-        layout.addLayout(pager)
+        navigation_table_layout.addLayout(pager)
+
+        self.navigation_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.navigation_splitter.setChildrenCollapsible(False)
+        self.navigation_splitter.addWidget(navigation_table_panel)
+        self.path_details = PathDetailsPanel()
+        self.path_details.setMinimumHeight(260)
+        self.path_details.setVisible(False)
+        self.navigation_splitter.addWidget(self.path_details)
+        self.navigation_splitter.setSizes([360, 420])
+        layout.addWidget(self.navigation_splitter, 1)
         return panel
 
     def _build_menus(self) -> None:
@@ -585,6 +618,9 @@ class MainWindow(QMainWindow):
         self.previous_button.setVisible(paged)
         self.next_button.setVisible(paged)
         self.page_label.setVisible(paged)
+        self.path_details.setVisible(
+            self._navigation_level == "commands" and self._current_command is not None
+        )
         max_page = max(1, (self._total + self._page_size - 1) // self._page_size)
         self.page_label.setText(f"第 {self._page_no} / {max_page} 页，共 {self._total} 条")
         self.previous_button.setEnabled(self._page_no > 1 and not self._busy)
@@ -651,19 +687,202 @@ class MainWindow(QMainWindow):
         client = self._ensure_client()
         if client is None:
             return
+        try:
+            dimensions = self._dimensions_for(vin)
+        except ValueError as exc:
+            self._show_error(str(exc))
+            return
         self._current_command = command
+        self._displayed_path_vin = vin
+        self._displayed_path_command_id = command.id
+        self._path_documents = {
+            "dispatched": CommandPathData.empty(),
+            "actual": CommandPathData.empty(),
+        }
+        self._dispatched_path = ()
+        self._actual_path = ()
+        self._path_load_generation += 1
+        generation = self._path_load_generation
+        self._analysis_generation += 1
+        self._radius_states = {"dispatched": None, "actual": None}
+        self._calculated_radii = {"dispatched": (), "actual": ()}
+        self._refresh_radius_measurements()
+        self.path_details.begin_command()
+        self.canvas.set_paths((), (), dimensions)
+        self.canvas.set_active_path("dispatched")
         self._update_navigation_header()
-        self._run_network(
-            "加载两类路径",
-            lambda: (
-                client.get_dispatched_path(command_id=command.id),
-                client.get_actual_path(command_id=command.id, vin=vin),
-            ),
-            lambda result: self._show_paths(
-                vin,
-                cast(tuple[tuple[PosePoint, ...], tuple[PosePoint, ...]], result),
-            ),
+        self._start_path_request(
+            "dispatched",
+            generation,
+            lambda: client.get_dispatched_path(command_id=command.id),
         )
+        self._start_path_request(
+            "actual",
+            generation,
+            lambda: client.get_actual_path(command_id=command.id, vin=vin),
+        )
+
+    def _start_path_request(
+        self,
+        path_name: str,
+        generation: int,
+        operation: Callable[[], CommandPathData],
+    ) -> None:
+        key = (generation, path_name)
+        if key in self._pending_path_loads:
+            return
+        self._pending_path_loads.add(key)
+        self.path_details.set_source_loading(path_name)
+        self._set_busy(True, f"正在加载{('下发' if path_name == 'dispatched' else '实际')}路径…")
+        worker: Worker[object] = Worker(operation)
+        self._workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda result: self._path_source_loaded(
+                generation,
+                path_name,
+                cast(CommandPathData, result),
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: self._path_source_failed(generation, path_name, message)
+        )
+        worker.signals.finished.connect(
+            lambda: self._path_source_finished(worker, generation, path_name)
+        )
+        self._path_pool.start(worker)
+
+    def _path_source_loaded(
+        self,
+        generation: int,
+        path_name: str,
+        document: CommandPathData,
+    ) -> None:
+        if generation != self._path_load_generation:
+            return
+        self._path_documents[path_name] = document
+        self.path_details.set_source_document(path_name, document)
+        self._sync_loaded_paths()
+
+    def _path_source_failed(self, generation: int, path_name: str, message: str) -> None:
+        if generation != self._path_load_generation:
+            return
+        self.path_details.set_source_error(path_name, message)
+
+    def _path_source_finished(
+        self,
+        worker: Worker[object],
+        generation: int,
+        path_name: str,
+    ) -> None:
+        self._workers.discard(worker)
+        self._pending_path_loads.discard((generation, path_name))
+        if generation != self._path_load_generation:
+            return
+        if any(
+            item_generation == generation
+            for item_generation, _name in self._pending_path_loads
+        ):
+            return
+        self._set_busy(False, "就绪")
+        self._finish_path_loading()
+
+    def _retry_path_source(self, path_name: str) -> None:
+        if self._current_command is None or self._displayed_path_vin is None:
+            return
+        client = self._ensure_client()
+        if client is None:
+            return
+        generation = self._path_load_generation
+        command_id = self._current_command.id
+        vin = self._displayed_path_vin
+        operation = (
+            (lambda: client.get_dispatched_path(command_id=command_id))
+            if path_name == "dispatched"
+            else (lambda: client.get_actual_path(command_id=command_id, vin=vin))
+        )
+        self._start_path_request(path_name, generation, operation)
+
+    def _sync_loaded_paths(self) -> None:
+        vin = self._displayed_path_vin
+        if vin is None:
+            return
+        try:
+            dimensions = self._dimensions_for(vin)
+        except ValueError:
+            return
+        dispatched = self._path_documents["dispatched"]
+        actual = self._path_documents["actual"]
+        self._dispatched_path = dispatched.poses
+        self._actual_path = actual.poses
+        self.canvas.set_paths(
+            self._dispatched_path,
+            self._actual_path,
+            dimensions,
+            source_indices={
+                "dispatched": dispatched.pose_source_indices,
+                "actual": actual.pose_source_indices,
+            },
+        )
+        active_path = self.path_details.current_path_name
+        self.canvas.set_active_path(active_path)
+        selected = self.path_details.selected_source_index(active_path)
+        if selected is not None:
+            self.canvas.select_path_point(active_path, selected, ensure_visible=False)
+
+    def _finish_path_loading(self) -> None:
+        self._load_radius_measurements()
+        self._refresh_radius_measurements()
+        vin = self._displayed_path_vin or ""
+        self.status_label.setText(
+            f"下发 {len(self._path_documents['dispatched'].points)} 点；"
+            f"实际 {len(self._path_documents['actual'].points)} 点；VIN {vin}"
+        )
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "command_paths_loaded",
+            order_id=self._current_order.id if self._current_order else None,
+            task_id=self._current_task.id if self._current_task else None,
+            command_id=self._current_command.id if self._current_command else None,
+            map_id=self._lane_key[1] if self._lane_key else None,
+            vin=vin,
+            dispatched_points=len(self._path_documents["dispatched"].points),
+            actual_points=len(self._path_documents["actual"].points),
+        )
+        self.analyze_now()
+
+    def _path_detail_selected(self, path_name: str, source_index: int) -> None:
+        if self.canvas.select_path_point(path_name, source_index):
+            point = next(
+                (
+                    item
+                    for item in self._path_documents[path_name].points
+                    if item.source_index == source_index
+                ),
+                None,
+            )
+            if point is not None and point.yaw is None:
+                self.status_label.setText(
+                    f"点位 {source_index + 1} 缺少有效 yaw，无法绘制车辆框"
+                )
+            return
+        self.canvas.clear_path_point_selection()
+        self.status_label.setText(
+            f"点位 {source_index + 1} 缺少有效坐标，无法在地图中定位"
+        )
+
+    def _canvas_path_point_selected(self, path_name: str, source_index: int) -> None:
+        self.path_details.select_point(path_name, source_index, emit_signal=False)
+
+    def _active_path_changed(self, path_name: str) -> None:
+        self.canvas.set_active_path(path_name)
+        selected = self.path_details.selected_source_index(path_name)
+        if selected is None or not self.canvas.select_path_point(
+            path_name,
+            selected,
+            ensure_visible=False,
+        ):
+            self.canvas.clear_path_point_selection()
 
     def _server_id(self) -> str:
         root = self.config.connection().validated_root()
@@ -978,37 +1197,18 @@ class MainWindow(QMainWindow):
     def _show_paths(
         self,
         vin: str,
-        paths: tuple[tuple[PosePoint, ...], tuple[PosePoint, ...]],
+        paths: tuple[CommandPathData, CommandPathData],
     ) -> None:
-        self._dispatched_path, self._actual_path = paths
+        self._path_documents = {"dispatched": paths[0], "actual": paths[1]}
         self._displayed_path_vin = vin
         self._displayed_path_command_id = (
             self._current_command.id if self._current_command is not None else None
         )
-        try:
-            dimensions = self._dimensions_for(vin)
-        except ValueError as exc:
-            self._show_error(str(exc))
-            return
-        self.canvas.set_paths(self._dispatched_path, self._actual_path, dimensions)
-        self._load_radius_measurements()
-        self._refresh_radius_measurements()
-        self.status_label.setText(
-            f"下发 {len(self._dispatched_path)} 点；实际 {len(self._actual_path)} 点；VIN {vin}"
-        )
-        log_event(
-            LOGGER,
-            logging.INFO,
-            "command_paths_loaded",
-            order_id=self._current_order.id if self._current_order else None,
-            task_id=self._current_task.id if self._current_task else None,
-            command_id=self._current_command.id if self._current_command else None,
-            map_id=self._lane_key[1] if self._lane_key else None,
-            vin=vin,
-            dispatched_points=len(self._dispatched_path),
-            actual_points=len(self._actual_path),
-        )
-        self.analyze_now()
+        self.path_details.begin_command()
+        self.path_details.set_source_document("dispatched", paths[0])
+        self.path_details.set_source_document("actual", paths[1])
+        self._sync_loaded_paths()
+        self._finish_path_loading()
 
     def analyze_now(self) -> None:
         if (
@@ -1248,6 +1448,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             self._client = None
         if context_changed:
+            self._path_load_generation += 1
             self._lane_key = None
             self.canvas.load_layout(LaneLayout("0000000000000000", "0", []))
             self._navigation_level = "orders"
@@ -1256,6 +1457,11 @@ class MainWindow(QMainWindow):
             self._current_command = None
             self._displayed_path_vin = None
             self._displayed_path_command_id = None
+            self._path_documents = {
+                "dispatched": CommandPathData.empty(),
+                "actual": CommandPathData.empty(),
+            }
+            self.path_details.begin_command()
             self.canvas.clear_paths()
             self._radius_states = {"dispatched": None, "actual": None}
             self._radius_generations["dispatched"] += 1
