@@ -13,8 +13,8 @@ import requests
 
 from route_analysis.errors import ApiError, AuthenticationError, DataContractError
 from route_analysis.logging_setup import log_event
-from route_analysis.models import PosePoint
-from route_analysis.parsing import parse_command_path
+from route_analysis.models import CommandPathData
+from route_analysis.parsing import parse_command_details
 
 LOGGER = logging.getLogger(__name__)
 
@@ -373,19 +373,19 @@ class SchedulerClient:
         return tuple(commands)
 
     @staticmethod
-    def _path_from_response(data: object) -> tuple[PosePoint, ...]:
+    def _path_from_response(data: object) -> CommandPathData:
         if not isinstance(data, Mapping):
             raise DataContractError("路径响应必须是对象")
         command = data.get("commandStr")
         if command is None or command == "":
-            return ()
-        return parse_command_path(command)
+            return CommandPathData.empty()
+        return parse_command_details(command)
 
-    def get_dispatched_path(self, *, command_id: int) -> tuple[PosePoint, ...]:
+    def get_dispatched_path(self, *, command_id: int) -> CommandPathData:
         data = self._get("/scheduling/order-task/commandStr", {"id": command_id})
         return self._path_from_response(data)
 
-    def get_actual_path(self, *, command_id: int, vin: str) -> tuple[PosePoint, ...]:
+    def get_actual_path(self, *, command_id: int, vin: str) -> CommandPathData:
         data = self._get(
             "/scheduling/order-task/actualPath",
             {"commandId": command_id, "vin": vin},
