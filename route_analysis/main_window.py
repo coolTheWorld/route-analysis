@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
         }
         self._path_load_generation = 0
         self._pending_path_loads: set[tuple[int, str]] = set()
+        self._path_loading_busy = False
         self._displayed_path_vin: str | None = None
         self._displayed_path_command_id: int | None = None
         self._radius_states: dict[str, RadiusMeasurementState | None] = {
@@ -732,6 +733,7 @@ class MainWindow(QMainWindow):
         if key in self._pending_path_loads:
             return
         self._pending_path_loads.add(key)
+        self._path_loading_busy = True
         self.path_details.set_source_loading(path_name)
         self._set_busy(True, f"正在加载{('下发' if path_name == 'dispatched' else '实际')}路径…")
         worker: Worker[object] = Worker(operation)
@@ -777,12 +779,19 @@ class MainWindow(QMainWindow):
         self._workers.discard(worker)
         self._pending_path_loads.discard((generation, path_name))
         if generation != self._path_load_generation:
+            if self._path_loading_busy and not any(
+                item_generation == self._path_load_generation
+                for item_generation, _name in self._pending_path_loads
+            ):
+                self._path_loading_busy = False
+                self._set_busy(False, "就绪")
             return
         if any(
             item_generation == generation
             for item_generation, _name in self._pending_path_loads
         ):
             return
+        self._path_loading_busy = False
         self._set_busy(False, "就绪")
         self._finish_path_loading()
 
@@ -1449,6 +1458,8 @@ class MainWindow(QMainWindow):
             self._client = None
         if context_changed:
             self._path_load_generation += 1
+            self._path_loading_busy = False
+            self._set_busy(False, "就绪")
             self._lane_key = None
             self.canvas.load_layout(LaneLayout("0000000000000000", "0", []))
             self._navigation_level = "orders"

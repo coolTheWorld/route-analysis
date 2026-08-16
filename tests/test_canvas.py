@@ -380,3 +380,24 @@ def test_map_click_uses_active_path_and_cycles_overlapping_source_indices(
     with qtbot.waitSignal(canvas.path_point_selected, timeout=1000) as actual:
         qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
     assert actual.args == ["actual", 9]
+
+
+def test_dragging_lane_over_path_moves_lane_instead_of_selecting_point(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.load_layout(layout())
+    canvas.set_snap_enabled(False)
+    canvas.set_paths((PosePoint(1.5, 0, 0),), (), VehicleDimensions(1, 1, 1))
+    start = canvas.mapFromScene(1.5, 0)
+    end = canvas.mapFromScene(3.5, 2)
+
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=end)
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    moved = canvas.current_layout().lanes[0]
+    assert moved.anchors[0].point.x == pytest.approx(2, abs=0.05)
+    assert moved.anchors[0].point.y == pytest.approx(2, abs=0.05)
+    assert canvas.selected_path_point is None

@@ -33,6 +33,7 @@ from route_analysis.turn_measurements import (
     RadiusMeasurementState,
     path_fingerprint,
 )
+from route_analysis.workers import Worker
 
 
 class FakeClient:
@@ -206,6 +207,29 @@ def test_path_sources_fail_independently_and_actual_can_retry(
     qtbot.waitUntil(lambda: window.path_details.models["actual"].rowCount() == 2)
     assert window.path_details.retry_buttons["actual"].isHidden()
     assert client.actual_calls == 2
+
+
+def test_stale_path_request_completion_does_not_leave_navigation_busy(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path,
+        client_factory=lambda _settings: FakeClient(),
+        auto_load=False,
+    )
+    qtbot.addWidget(window)
+    stale_worker: Worker[object] = Worker(lambda: None)
+    window._workers.add(stale_worker)
+    window._path_load_generation = 2
+    window._pending_path_loads.add((1, "actual"))
+    window._path_loading_busy = True
+    window._set_busy(True, "正在加载旧命令")
+
+    window._path_source_finished(stale_worker, 1, "actual")
+
+    assert window._busy is False
+    assert window.table.isEnabled()
 
 
 def test_returning_to_tasks_keeps_displayed_paths_analyzable(qtbot: QtBot, tmp_path: Path) -> None:

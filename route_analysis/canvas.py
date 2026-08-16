@@ -128,6 +128,7 @@ class RouteCanvas(QGraphicsView):
         self._active_path_name = "dispatched"
         self._selected_path_point: tuple[str, int] | None = None
         self._last_path_click: tuple[str, tuple[int, ...], Point2D, int] | None = None
+        self._pending_path_click: tuple[str, tuple[int, ...], Point2D] | None = None
         self._dimensions: VehicleDimensions | None = None
         self._bezier_tolerance = 0.02
         self._miter_limit = 4.0
@@ -275,6 +276,7 @@ class RouteCanvas(QGraphicsView):
         self._results = {"dispatched": None, "actual": None}
         self._selected_path_point = None
         self._last_path_click = None
+        self._pending_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
         self._manual_radius_suggestions.clear()
@@ -293,6 +295,7 @@ class RouteCanvas(QGraphicsView):
         self._results = {"dispatched": None, "actual": None}
         self._selected_path_point = None
         self._last_path_click = None
+        self._pending_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
         self._manual_radius_suggestions.clear()
@@ -717,6 +720,18 @@ class RouteCanvas(QGraphicsView):
         self._last_path_click = (path_name, ordered, raw, selected)
         return selected
 
+    def _select_clicked_path_point(
+        self,
+        path_name: str,
+        candidates: list[int],
+        raw: Point2D,
+    ) -> None:
+        internal_index = self._cycle_path_candidate(path_name, candidates, raw)
+        source_index = self._path_source_indices[path_name][internal_index]
+        self._selected_path_point = (path_name, source_index)
+        self._rebuild_scene()
+        self.path_point_selected.emit(path_name, source_index)
+
     def _choose_path_candidate(
         self,
         path_name: str,
@@ -788,6 +803,7 @@ class RouteCanvas(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self._pending_path_click = None
             raw = self._raw_from_event(event)
             if self._manual_radius_path is not None:
                 candidates = self._path_point_candidates(self._manual_radius_path, raw)
@@ -810,25 +826,25 @@ class RouteCanvas(QGraphicsView):
                 self._rebuild_scene()
                 return
             candidates = self._path_point_candidates(self._active_path_name, raw)
-            if candidates:
-                internal_index = self._cycle_path_candidate(
-                    self._active_path_name,
-                    candidates,
-                    raw,
-                )
-                source_index = self._path_source_indices[self._active_path_name][
-                    internal_index
-                ]
-                self._selected_path_point = (self._active_path_name, source_index)
-                self._rebuild_scene()
-                self.path_point_selected.emit(self._active_path_name, source_index)
-                return
             target = self._hit_test(raw)
             if target is not None:
+                if candidates and target.kind == "lane":
+                    self._pending_path_click = (
+                        self._active_path_name,
+                        tuple(candidates),
+                        raw,
+                    )
                 self._drag_target = target
                 self._drag_before = copy.deepcopy(self._layout)
                 self._emit_selection()
                 self._rebuild_scene()
+                return
+            if candidates:
+                self._select_clicked_path_point(
+                    self._active_path_name,
+                    candidates,
+                    raw,
+                )
                 return
         super().mousePressEvent(event)
 
@@ -872,6 +888,8 @@ class RouteCanvas(QGraphicsView):
         if self._drag_target is not None and event.button() == Qt.MouseButton.LeftButton:
             before = self._drag_before
             after = copy.deepcopy(self._layout)
+            pending_path_click = self._pending_path_click
+            self._pending_path_click = None
             command_text = (
                 "平移整条车道"
                 if self._drag_target.kind == "lane"
@@ -881,6 +899,9 @@ class RouteCanvas(QGraphicsView):
             self._drag_before = None
             if before is not None and before != after:
                 self.undo_stack.push(_LayoutCommand(self, before, after, command_text))
+            elif pending_path_click is not None:
+                path_name, candidates, raw = pending_path_click
+                self._select_clicked_path_point(path_name, list(candidates), raw)
             return
         super().mouseReleaseEvent(event)
 
