@@ -243,6 +243,7 @@ class ControlPanel(QScrollArea):
         self.width_spin = _coordinate_spin()
         self.width_spin.setRange(0, 1000)
         self.width_spin.setSuffix(" m")
+        self.width_spin.valueChanged.connect(self._draft_width_changed)
         self.width_spin.editingFinished.connect(self._width_changed)
         self.enabled_check = QCheckBox("参与可通行区域并集")
         self.enabled_check.toggled.connect(self._enabled_changed)
@@ -596,6 +597,27 @@ class ControlPanel(QScrollArea):
         lane = self._selected_lane()
         self._updating = True
         try:
+            if self.canvas.is_drawing:
+                for widget in (
+                    self.name_edit,
+                    self.length_spin,
+                    self.enabled_check,
+                    self.closed_check,
+                    self.default_join_combo,
+                    self.anchor_combo,
+                    self.anchor_x,
+                    self.anchor_y,
+                    self.anchor_join_combo,
+                    self.segment_combo,
+                    self.segment_kind_combo,
+                    self.arc_radius_spin,
+                    *self.control_spins,
+                ):
+                    widget.setEnabled(False)
+                self.width_spin.setEnabled(True)
+                self.width_spin.setValue(self.canvas.draft_width)
+                self.width_spin.setToolTip("正在绘制的新车道总宽，修改后预览立即更新")
+                return
             enabled = lane is not None
             for widget in (
                 self.name_edit,
@@ -605,9 +627,14 @@ class ControlPanel(QScrollArea):
                 self.closed_check,
                 self.default_join_combo,
                 self.anchor_combo,
+                self.anchor_x,
+                self.anchor_y,
+                self.anchor_join_combo,
                 self.segment_combo,
+                self.segment_kind_combo,
             ):
                 widget.setEnabled(enabled)
+            self.width_spin.setToolTip("")
             if lane is None:
                 self.name_edit.clear()
                 self.length_spin.setValue(0)
@@ -680,13 +707,15 @@ class ControlPanel(QScrollArea):
                 spin.setValue(value)
 
     def _toggle_drawing(self) -> None:
-        if self.canvas._drawing:
+        if self.canvas.is_drawing:
             self.canvas.finish_lane_drawing()
         else:
             self.canvas.start_lane_drawing(width=self.default_lane_width)
 
     def _drawing_changed(self, drawing: bool) -> None:
         self.draw_button.setText("完成车道（Enter）" if drawing else "绘制新车道")
+        self.lane_list.setEnabled(not drawing)
+        self._refresh_properties()
 
     def _delete_selected(self) -> None:
         if self.canvas.selected_lane_id:
@@ -712,7 +741,16 @@ class ControlPanel(QScrollArea):
             QMessageBox.warning(self, "车道长度无效", str(exc))
 
     def _width_changed(self) -> None:
-        if self._updating or not self.canvas.selected_lane_id:
+        if self._updating:
+            return
+        if self.canvas.is_drawing:
+            try:
+                self.canvas.set_draft_lane_width(self.width_spin.value())
+            except ValueError as exc:
+                self.width_spin.setValue(self.canvas.draft_width)
+                QMessageBox.warning(self, "车道宽度无效", str(exc))
+            return
+        if not self.canvas.selected_lane_id:
             return
         lane = self._selected_lane()
         if lane is None:
@@ -722,6 +760,11 @@ class ControlPanel(QScrollArea):
         except ValueError as exc:
             self.width_spin.setValue(lane.width)
             QMessageBox.warning(self, "车道宽度无效", str(exc))
+
+    def _draft_width_changed(self, width: float) -> None:
+        if self._updating or not self.canvas.is_drawing or width <= 0:
+            return
+        self.canvas.set_draft_lane_width(width)
 
     def _enabled_changed(self, enabled: bool) -> None:
         if not self._updating and self.canvas.selected_lane_id:

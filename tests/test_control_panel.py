@@ -74,6 +74,35 @@ def test_zero_length_lane_disables_only_length_input(qtbot: QtBot) -> None:
     assert panel.width_spin.isEnabled() is True
 
 
+def test_drawing_mode_uses_width_input_for_live_draft_without_editing_selected_lane(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    canvas.load_layout(
+        LaneLayout(
+            "aaaaaaaaaaaaaaaa",
+            "42",
+            [Lane.create("lane", "Lane", 2, [Point2D(0, 0), Point2D(3, 0)])],
+        )
+    )
+    panel.set_configuration(default_lane_width=2.5, direction=0)
+
+    panel.draw_button.click()
+
+    assert canvas.is_drawing is True
+    assert panel.width_spin.isEnabled() is True
+    assert panel.width_spin.value() == pytest.approx(2.5)
+    panel.width_spin.setValue(4)
+    panel.width_spin.editingFinished.emit()
+
+    assert canvas.draft_width == 4
+    assert canvas.current_layout().lanes[0].width == 2
+    assert canvas.undo_stack.count() == 0
+
+
 def test_radius_panel_groups_automatic_and_manual_measurements_with_five_values(
     qtbot: QtBot,
 ) -> None:

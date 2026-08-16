@@ -1,8 +1,14 @@
 import math
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsTextItem
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsEllipseItem,
+    QGraphicsPathItem,
+    QGraphicsPolygonItem,
+    QGraphicsTextItem,
+)
 from pytestqt.qtbot import QtBot
 
 from route_analysis.canvas import RouteCanvas
@@ -24,6 +30,14 @@ def layout() -> LaneLayout:
         "aaaaaaaaaaaaaaaa",
         "42",
         [Lane.create("lane-1", "主车道", 2, [Point2D(0, 0), Point2D(3, 0)])],
+    )
+
+
+def _draft_path(canvas: RouteCanvas, tag: str) -> QGraphicsPathItem:
+    return next(
+        item
+        for item in canvas.scene().items()
+        if isinstance(item, QGraphicsPathItem) and item.data(0) == tag
     )
 
 
@@ -58,6 +72,175 @@ def test_lane_edits_are_undoable_and_new_lanes_default_to_sharp(qtbot: QtBot) ->
     assert canvas.current_layout().lanes[-1].width == 2.5
     canvas.undo_stack.redo()
     assert canvas.current_layout().lanes[-1].width == 3.0
+
+
+def test_lane_drawing_previews_snapped_candidate_before_first_anchor(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_paths(
+        (PosePoint(2, 1, 0),),
+        (),
+        VehicleDimensions(1, 1, 1),
+    )
+    canvas.start_lane_drawing(width=2)
+    route_item = next(
+        item
+        for item in canvas.scene().items()
+        if isinstance(item, QGraphicsPathItem) and item.zValue() == 5
+    )
+
+    qtbot.mouseMove(canvas.viewport(), pos=canvas.mapFromScene(2.03, 1.01))
+
+    assert canvas.draft_points == ()
+    assert canvas.draft_hover_point == Point2D(2, 1)
+    assert any(item.data(0) == "draft-candidate" for item in canvas.scene().items())
+    assert not any(item.data(0) == "draft-centerline" for item in canvas.scene().items())
+    assert route_item in canvas.scene().items()
+
+
+def test_lane_drawing_previews_centerline_and_width_without_mutating_layout(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_snap_enabled(False)
+    canvas.start_lane_drawing(width=2)
+
+    qtbot.mouseClick(
+        canvas.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=canvas.mapFromScene(0, 0),
+    )
+    qtbot.mouseMove(canvas.viewport(), pos=canvas.mapFromScene(3, 0))
+
+    assert canvas.draft_points == (Point2D(0, 0),)
+    assert canvas.draft_hover_point is not None
+    assert canvas.draft_hover_point.x == pytest.approx(3, abs=0.05)
+    assert canvas.draft_hover_point.y == pytest.approx(0, abs=0.05)
+    assert canvas.current_layout().lanes == []
+    assert _draft_path(canvas, "draft-centerline").path().elementCount() == 2
+    assert _draft_path(canvas, "draft-area").path().boundingRect().height() == pytest.approx(2)
+
+    canvas.set_draft_lane_width(4)
+
+    assert canvas.draft_width == 4
+    assert _draft_path(canvas, "draft-area").path().boundingRect().height() == pytest.approx(4)
+    assert canvas.current_layout().lanes == []
+
+
+def test_lane_drawing_fixes_each_clicked_anchor_and_commits_only_fixed_points(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_snap_enabled(False)
+    canvas.start_lane_drawing(width=2)
+    first = canvas.mapFromScene(0, 0)
+    second = canvas.mapFromScene(3, 0)
+    hover = canvas.mapFromScene(3, 2)
+
+    qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=first)
+    qtbot.mouseMove(canvas.viewport(), pos=second)
+    qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=second)
+    qtbot.mouseMove(canvas.viewport(), pos=hover)
+
+    assert len(canvas.draft_points) == 2
+    assert canvas.current_layout().lanes == []
+
+    lane_id = canvas.finish_lane_drawing()
+
+    assert lane_id is not None
+    lane = canvas.current_layout().lanes[0]
+    assert len(lane.anchors) == 2
+    assert lane.anchors[0].point.x == pytest.approx(0, abs=0.05)
+    assert lane.anchors[1].point.x == pytest.approx(3, abs=0.05)
+    assert canvas.undo_stack.count() == 1
+
+
+def test_lane_drawing_requires_two_points_and_rejects_duplicate_anchor(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_snap_enabled(False)
+    canvas.start_lane_drawing(width=2)
+    point = canvas.mapFromScene(0, 0)
+    qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    with qtbot.waitSignal(canvas.drawing_status_changed, timeout=1000) as duplicate:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert "重合" in duplicate.args[0]
+    assert len(canvas.draft_points) == 1
+
+    with qtbot.waitSignal(canvas.drawing_status_changed, timeout=1000) as incomplete:
+        result = canvas.finish_lane_drawing()
+    assert result is None
+    assert "至少需要两个锚点" in incomplete.args[0]
+    assert canvas.is_drawing is True
+
+
+def test_lane_drawing_backspace_leave_and_escape_manage_only_draft_state(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_snap_enabled(False)
+    canvas.start_lane_drawing(width=2)
+    for x in (0, 2, 4):
+        qtbot.mouseClick(
+            canvas.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=canvas.mapFromScene(x, 0),
+        )
+    qtbot.mouseMove(canvas.viewport(), pos=canvas.mapFromScene(4, 2))
+
+    qtbot.keyClick(canvas, Qt.Key.Key_Backspace)
+
+    assert len(canvas.draft_points) == 2
+    assert _draft_path(canvas, "draft-centerline").path().elementCount() == 3
+
+    QApplication.sendEvent(canvas, QEvent(QEvent.Type.Leave))
+
+    assert canvas.draft_hover_point is None
+    assert _draft_path(canvas, "draft-centerline").path().elementCount() == 2
+    assert not any(item.data(0) == "draft-candidate" for item in canvas.scene().items())
+
+    qtbot.keyClick(canvas, Qt.Key.Key_Escape)
+
+    assert canvas.is_drawing is False
+    assert canvas.draft_points == ()
+    assert canvas.current_layout().lanes == []
+
+
+def test_lane_drawing_double_click_finishes_without_duplicate_anchor(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.set_snap_enabled(False)
+    canvas.start_lane_drawing(width=2)
+    qtbot.mouseClick(
+        canvas.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=canvas.mapFromScene(0, 0),
+    )
+
+    qtbot.mouseDClick(
+        canvas.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=canvas.mapFromScene(3, 0),
+    )
+
+    assert canvas.is_drawing is False
+    lane = canvas.current_layout().lanes[0]
+    assert len(lane.anchors) == 2
+    assert lane.anchors[1].point.x == pytest.approx(3, abs=0.05)
 
 
 def test_segment_and_anchor_properties_can_be_edited(qtbot: QtBot) -> None:

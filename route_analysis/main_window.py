@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menus()
+        self.canvas.drawing_status_changed.connect(self.status_label.setText)
         self._apply_config()
         self.logging_state_changed.connect(self._apply_logging_state)
         if self._logging_manager is not None:

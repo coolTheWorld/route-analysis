@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 from uuid import uuid4
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -94,6 +94,7 @@ class RouteCanvas(QGraphicsView):
     selection_changed = Signal(str, int, int)
     mouse_coordinate_changed = Signal(float, float)
     drawing_state_changed = Signal(bool)
+    drawing_status_changed = Signal(str)
     radius_endpoint_selected = Signal(str, int)
     manual_radius_cancelled = Signal(str)
     path_point_selected = Signal(str, int)
@@ -146,6 +147,7 @@ class RouteCanvas(QGraphicsView):
         self._selected_segment = -1
         self._drawing = False
         self._draft_points: list[Point2D] = []
+        self._draft_hover_point: Point2D | None = None
         self._draft_width = 2.0
         self._draft_name = "新车道"
         self._drag_target: _DragTarget | None = None
@@ -182,6 +184,22 @@ class RouteCanvas(QGraphicsView):
     @property
     def selected_path_point(self) -> tuple[str, int] | None:
         return self._selected_path_point
+
+    @property
+    def is_drawing(self) -> bool:
+        return self._drawing
+
+    @property
+    def draft_points(self) -> tuple[Point2D, ...]:
+        return tuple(self._draft_points)
+
+    @property
+    def draft_hover_point(self) -> Point2D | None:
+        return self._draft_hover_point
+
+    @property
+    def draft_width(self) -> float:
+        return self._draft_width
 
     def current_layout(self) -> LaneLayout:
         return copy.deepcopy(self._layout)
@@ -638,25 +656,53 @@ class RouteCanvas(QGraphicsView):
             raise ValueError("lane width must be greater than zero")
         self._drawing = True
         self._draft_points.clear()
+        self._draft_hover_point = None
         self._draft_width = width
         self._draft_name = name
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.drawing_state_changed.emit(True)
-        self._rebuild_scene()
+        self.drawing_status_changed.emit("请点击第一个车道锚点")
+        self._refresh_draft_graphics()
+
+    def set_draft_lane_width(self, width: float) -> None:
+        if width <= 0:
+            raise ValueError("lane width must be greater than zero")
+        if not self._drawing:
+            raise RuntimeError("lane drawing is not active")
+        if self._draft_width == width:
+            return
+        self._draft_width = width
+        self._refresh_draft_graphics()
 
     def cancel_lane_drawing(self) -> None:
         self._drawing = False
         self._draft_points.clear()
+        self._draft_hover_point = None
         self.unsetCursor()
         self.drawing_state_changed.emit(False)
-        self._rebuild_scene()
+        self.drawing_status_changed.emit("已取消绘制新车道")
+        self._refresh_draft_graphics()
 
     def finish_lane_drawing(self) -> str | None:
         if len(self._draft_points) < 2:
+            self.drawing_status_changed.emit("至少需要两个锚点才能完成车道")
             return None
         points = self._draft_points.copy()
+        name = self._draft_name
         self.cancel_lane_drawing()
-        return self.add_lane(points, width=self._draft_width, name=self._draft_name)
+        lane_id = self.add_lane(points, width=self._draft_width, name=name)
+        self.drawing_status_changed.emit(f"已完成车道：{name}；点击保存后写入本地配置")
+        return lane_id
+
+    def _append_draft_point(self, point: Point2D) -> bool:
+        if self._draft_points and self._draft_points[-1] == point:
+            self.drawing_status_changed.emit("锚点与上一点重合，未新增锚点")
+            return False
+        self._draft_points.append(point)
+        self.drawing_status_changed.emit(
+            f"已固定第 {len(self._draft_points)} 个锚点，请移动鼠标并点击下一点"
+        )
+        return True
 
     def _snap(self, point: Point2D) -> Point2D:
         if not self._snap_enabled:
@@ -821,9 +867,9 @@ class RouteCanvas(QGraphicsView):
                     return
             if self._drawing:
                 snapped = self._snap(raw)
-                if not self._draft_points or self._draft_points[-1] != snapped:
-                    self._draft_points.append(snapped)
-                self._rebuild_scene()
+                self._draft_hover_point = snapped
+                self._append_draft_point(snapped)
+                self._refresh_draft_graphics()
                 return
             candidates = self._path_point_candidates(self._active_path_name, raw)
             target = self._hit_test(raw)
@@ -852,8 +898,8 @@ class RouteCanvas(QGraphicsView):
         if self._drawing and event.button() == Qt.MouseButton.LeftButton:
             raw = self._raw_from_event(event)
             snapped = self._snap(raw)
-            if not self._draft_points or self._draft_points[-1] != snapped:
-                self._draft_points.append(snapped)
+            self._draft_hover_point = snapped
+            self._append_draft_point(snapped)
             self.finish_lane_drawing()
             return
         super().mouseDoubleClickEvent(event)
@@ -862,6 +908,12 @@ class RouteCanvas(QGraphicsView):
         scene_position = self.mapToScene(event.position().toPoint())
         raw = self.to_raw(Point2D(scene_position.x(), scene_position.y()))
         self.mouse_coordinate_changed.emit(raw.x, raw.y)
+        if self._drawing:
+            snapped = self._snap(raw)
+            if snapped != self._draft_hover_point:
+                self._draft_hover_point = snapped
+                self._refresh_draft_graphics()
+            return
         if self._drag_target is not None and event.buttons() & Qt.MouseButton.LeftButton:
             snapped = self._snap(raw)
             if self._drag_target.kind == "lane":
@@ -917,7 +969,23 @@ class RouteCanvas(QGraphicsView):
         if self._drawing and event.key() == Qt.Key.Key_Escape:
             self.cancel_lane_drawing()
             return
+        if self._drawing and event.key() == Qt.Key.Key_Backspace:
+            if self._draft_points:
+                self._draft_points.pop()
+                self.drawing_status_changed.emit(
+                    f"已撤销最后一个锚点，当前共 {len(self._draft_points)} 个锚点"
+                )
+                self._refresh_draft_graphics()
+            else:
+                self.drawing_status_changed.emit("当前没有可撤销的锚点")
+            return
         super().keyPressEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._drawing and self._draft_hover_point is not None:
+            self._draft_hover_point = None
+            self._refresh_draft_graphics()
+        super().leaveEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
@@ -990,7 +1058,13 @@ class RouteCanvas(QGraphicsView):
                 painter_path.addPolygon(self._display_polygon(interior.coords))
         return painter_path
 
-    def _add_lane_graphics(self, lane: Lane, *, preview: bool = False) -> None:
+    def _add_lane_graphics(
+        self,
+        lane: Lane,
+        *,
+        preview: bool = False,
+        draft: bool = False,
+    ) -> None:
         area = build_lane_area(
             lane,
             tolerance=self._bezier_tolerance,
@@ -1007,7 +1081,9 @@ class RouteCanvas(QGraphicsView):
                 Qt.PenStyle.DashLine if preview else Qt.PenStyle.SolidLine,
             )
         )
-        area_item.setZValue(-10)
+        area_item.setZValue(38 if draft else -10)
+        if draft:
+            area_item.setData(0, "draft-area")
         self.scene().addItem(area_item)
 
         center_path = QPainterPath()
@@ -1026,7 +1102,9 @@ class RouteCanvas(QGraphicsView):
                 Qt.PenStyle.DashLine,
             ),
         )
-        center_item.setZValue(-5)
+        center_item.setZValue(40 if draft else -5)
+        if draft:
+            center_item.setData(0, "draft-centerline")
 
         if preview or lane.id != self._selected_lane_id:
             return
@@ -1129,18 +1207,40 @@ class RouteCanvas(QGraphicsView):
                 marker_item.setZValue(30)
 
     def _add_draft_graphics(self) -> None:
-        if not self._draft_points:
+        preview_points = self._draft_points.copy()
+        if self._draft_hover_point is not None and (
+            not preview_points or preview_points[-1] != self._draft_hover_point
+        ):
+            preview_points.append(self._draft_hover_point)
+        if len(preview_points) >= 2:
+            preview_lane = Lane.create(
+                "draft-preview",
+                self._draft_name,
+                self._draft_width,
+                preview_points,
+            )
+            self._add_lane_graphics(preview_lane, preview=True, draft=True)
+        if self._draft_hover_point is None:
             return
-        path = QPainterPath()
-        first = self.to_display(self._draft_points[0])
-        path.moveTo(first.x, first.y)
-        for raw in self._draft_points[1:]:
-            display = self.to_display(raw)
-            path.lineTo(display.x, display.y)
-        self.scene().addPath(
-            path,
-            self._cosmetic_pen(QColor("#00a884"), 2, Qt.PenStyle.DashLine),
-        ).setZValue(40)
+        display = self.to_display(self._draft_hover_point)
+        candidate = self.scene().addEllipse(
+            display.x - 0.11,
+            display.y - 0.11,
+            0.22,
+            0.22,
+            self._cosmetic_pen(QColor("#007c64"), 2),
+            QBrush(QColor("#ffffff")),
+        )
+        candidate.setZValue(41)
+        candidate.setData(0, "draft-candidate")
+
+    def _refresh_draft_graphics(self) -> None:
+        for item in tuple(self.scene().items()):
+            role = item.data(0)
+            if isinstance(role, str) and role.startswith("draft-"):
+                self.scene().removeItem(item)
+        if self._drawing:
+            self._add_draft_graphics()
 
     def _add_manual_radius_graphics(self) -> None:
         if self._manual_radius_path is None:

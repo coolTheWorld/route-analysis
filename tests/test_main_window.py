@@ -490,3 +490,17 @@ def test_automatic_and_manual_radius_measurements_are_saved_locally(
     assert saved_after_threshold_change.automatic_records == ()
     assert len(saved_after_threshold_change.manual_records) == 1
     assert "重新自动计算" in window.status_label.text()
+
+
+def test_lane_drawing_guidance_is_shown_in_status_bar(qtbot: QtBot, tmp_path: Path) -> None:
+    make_config(tmp_path)
+    window = MainWindow(tmp_path, auto_load=False)
+    qtbot.addWidget(window)
+
+    window.canvas.start_lane_drawing(width=2)
+    assert "第一个车道锚点" in window.status_label.text()
+
+    result = window.canvas.finish_lane_drawing()
+
+    assert result is None
+    assert "至少需要两个锚点" in window.status_label.text()
