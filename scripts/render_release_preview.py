@@ -6,8 +6,9 @@ import math
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QFont, QFontDatabase, QMouseEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 
 from route_analysis import __version__
@@ -134,7 +135,55 @@ def main() -> int:
     app.processEvents()
     point_output = output.with_name(f"{output.stem}-points{output.suffix}")
     points_saved = point_window.grab().save(str(point_output))
-    return 0 if overview_saved and radius_saved and points_saved else 1
+
+    draft_path = (
+        PosePoint(-3, -1, 0),
+        PosePoint(0, -1, 0),
+        PosePoint(2, 1, math.pi / 4),
+        PosePoint(4, 2, 0),
+    )
+    draft_canvas = RouteCanvas()
+    draft_canvas.set_paths(draft_path, (), VehicleDimensions(1.2, 1.5, 0.8))
+    draft_canvas.set_path_layer("dispatched", vehicles=False)
+    draft_panel = ControlPanel(draft_canvas)
+    draft_panel.set_configuration(default_lane_width=3.5, direction=0)
+    draft_splitter = QSplitter(Qt.Orientation.Horizontal)
+    draft_splitter.addWidget(draft_canvas)
+    draft_splitter.addWidget(draft_panel)
+    draft_splitter.setSizes([1050, 390])
+    draft_window = QMainWindow()
+    draft_window.setWindowTitle(
+        f"Suntae 路径通行分析 {__version__} — 动态手绘车道视觉检查"
+    )
+    draft_window.setCentralWidget(draft_splitter)
+    draft_window.resize(1440, 860)
+    draft_window.show()
+    app.processEvents()
+    draft_canvas.fit_content()
+    app.processEvents()
+    draft_panel.draw_button.click()
+    for point in draft_path[:2]:
+        display = draft_canvas.to_display(Point2D(point.x, point.y))
+        QTest.mouseClick(
+            draft_canvas.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=draft_canvas.mapFromScene(display.x, display.y),
+        )
+    candidate = draft_canvas.to_display(Point2D(draft_path[2].x, draft_path[2].y))
+    candidate_position = draft_canvas.mapFromScene(candidate.x, candidate.y)
+    candidate_event = QMouseEvent(
+        QEvent.Type.MouseMove,
+        QPointF(candidate_position),
+        QPointF(draft_canvas.viewport().mapToGlobal(candidate_position)),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(draft_canvas.viewport(), candidate_event)
+    app.processEvents()
+    draft_output = output.with_name(f"{output.stem}-lane-draft{output.suffix}")
+    draft_saved = draft_window.grab().save(str(draft_output))
+    return 0 if overview_saved and radius_saved and points_saved and draft_saved else 1
 
 
 if __name__ == "__main__":
