@@ -8,6 +8,7 @@ from route_analysis.control_panel import ControlPanel
 from route_analysis.geometry import lane_centerline_length
 from route_analysis.models import Lane, Point2D, PosePoint, VehicleDimensions
 from route_analysis.storage import LaneLayout
+from route_analysis.theme import APPLICATION_STYLESHEET
 from route_analysis.turn_measurements import (
     MeasurementSource,
     RadiusMeasurementState,
@@ -25,6 +26,25 @@ def _turn_path() -> tuple[PosePoint, ...]:
         )
         for angle in (index * math.pi / 40 for index in range(21))
     )
+
+
+def test_coordinate_inputs_show_their_value_without_clipping(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    panel.setStyleSheet(APPLICATION_STYLESHEET)
+    panel.set_configuration(default_lane_width=2.8, direction=0)
+    panel.show()
+    qtbot.waitExposed(panel)
+
+    for spin in (panel.direction_spin, panel.width_spin, panel.length_spin, panel.anchor_x):
+        editor = spin.lineEdit()
+        rendered = editor.fontMetrics().horizontalAdvance(editor.text())
+        assert rendered <= editor.contentsRect().width(), (
+            f"{editor.text()!r} needs {rendered} px but only has "
+            f"{editor.contentsRect().width()} px"
+        )
 
 
 def test_lane_length_and_width_commit_only_when_editing_finishes(qtbot: QtBot) -> None:

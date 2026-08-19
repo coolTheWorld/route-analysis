@@ -1,12 +1,12 @@
 # Suntae 路径通行分析
 
-Windows x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单、任务、命令、下发路径和实际执行路径，并用可编辑车道和叉车矩形包络分析直行、转弯时的通行情况。
+Windows x64 与 Linux x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单、任务、命令、下发路径和实际执行路径，并用可编辑车道和叉车矩形包络分析直行、转弯时的通行情况。
 
 ## 主要能力
 
 - 订单 ID 精确查询与服务端分页，逐级进入订单 → 任务 → 命令 → 路径。
 - 命令下发/实际点位按原始顺序列表展示，保留 Gear、完整命令/点位 JSON，并与画布中心点及车辆框双向联动。
-- 同画布显示下发/实际路径，中心线、每点车辆矩形、越界标记可分别开关或隔离查看。
+- 同画布显示下发/实际路径，中心线、每点车辆矩形、越界标记可分别开关或隔离查看；中心线同时给每个有坐标的位姿点标一个圆点，一个不少；圆点直径按拥挤程度自适应收缩，密集处变小但不消失，稀疏处保持满尺寸。
 - 后端坐标按叉车前轴中心解释；车宽、中心前距、中心后距为米，yaw 和地图方向为弧度。
 - 车辆尺寸支持全局默认与 VIN 覆盖；缺 yaw 点不猜测方向，只显示中心点并排除相关分析段。
 - 鼠标逐点绘制多锚点车道，首次点击后实时预览吸附中心线和完整车道宽度，或从下发/实际路径自动生成；中心线支持直线、真实圆弧和分段三次贝塞尔，开放平头或闭合环，每车道独立总宽。
@@ -15,33 +15,35 @@ Windows x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单
 - 多个启用车道区域取并集；按位置/yaw 步长连续插值车辆包络，分别给出绿/黄/红结果、最小净距与首次越界位置。
 - 自动或手动选择每个转弯的入弯/出弯样本，以整弯等效旋转中心计算前轴中心、前外角、后外角、前内角、后内角五个固定半径；测量可命名、删除、离线保留并在画布定位。
 - 车道编辑支持拖动锚点/控制点或整条车道、输入真实中心线总长和车道总宽、路径点吸附、撤销/重做、手动保存、前版备份、导入仅替换和导出。
-- 本地便携存储和结构化轮转日志；打包版使用 EXE 同级 `data/` 与 `log/`。
+- 本地便携存储和结构化轮转日志；打包版使用入口可执行文件同级 `data/` 与 `log/`。
 
 完整操作见 [用户手册](docs/user-guide.md)，接口事实见 [API 契约](docs/api-contract.md)。
 
 ## 开发环境
 
-开发与构建要求 Windows x64 和 Python 3.12 x64。当前验证依赖版本记录在 `requirements*.txt`。PySide6 是 Qt 官方 Python 绑定；几何计算使用 Shapely/GEOS。
+支持两个平台：Windows x64 配 Python 3.12 x64；Linux x86_64 配 Python 3.12–3.14，验证基线为 Ubuntu 26.04（glibc 2.43）。当前验证依赖版本记录在 `requirements*.txt`。PySide6 是 Qt 官方 Python 绑定；几何计算使用 Shapely/GEOS。
 
-首次准备：
+Windows 首次准备、源码启动与直接运行：
 
 ```powershell
 .\scripts\bootstrap.cmd
-```
-
-源码启动：
-
-```powershell
 .\scripts\run.cmd
-```
-
-也可直接运行：
-
-```powershell
 .\.venv\Scripts\python.exe -m route_analysis
 ```
 
+Linux 首次准备、源码启动与直接运行：
+
+```bash
+./scripts/bootstrap.sh
+./scripts/run.sh
+./.venv/bin/python -m route_analysis
+```
+
+两个平台共用同一个 `.venv/`。`bootstrap.sh` 按 `python3.12`、`python3.13`、`python3.14`、`python3` 顺序取第一个满足 `>=3.12,<3.15` 的解释器并打印实际版本。`run.sh` 转发全部命令行参数；当 `DISPLAY` 与 `WAYLAND_DISPLAY` 都未设置且未指定 `QT_QPA_PLATFORM` 时直接报错并给出提示，不把 Qt 平台插件错误留给使用者。
+
 ## 测试与质量检查
+
+Windows：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
@@ -50,26 +52,53 @@ Windows x64 桌面工具。它以只读方式查询 Suntae 调度后端的订单
 .\.venv\Scripts\python.exe -m route_analysis --smoke-test
 ```
 
+Linux：
+
+```bash
+./.venv/bin/python -m pytest
+./.venv/bin/python -m ruff check route_analysis tests
+./.venv/bin/python -m mypy route_analysis
+./.venv/bin/python -m route_analysis --smoke-test
+```
+
 测试默认使用 Qt 离屏平台，不需要打开窗口或连接真实后端。
 
-## Windows x64 打包
+## 打包
+
+两个平台共用 `route-analysis.spec`，都产出文件夹模式发布物：入口可执行文件与依赖同目录，必须整个目录一起复制；首次正常运行后按需在入口同级创建 `data/` 与 `log/`。
+
+Windows x64：
 
 ```powershell
 .\scripts\build.cmd
 ```
 
-发布目录为 `dist\RouteAnalysis\`，入口为 `RouteAnalysis.exe`。它是文件夹模式发布物，必须连同目录中其他文件一起复制。首次正常运行后会按需创建 `dist\RouteAnalysis\data\` 和 `dist\RouteAnalysis\log\`。
-
-验证发布物：
+发布目录为 `dist\RouteAnalysis\`，入口为 `RouteAnalysis.exe`。验证发布物：
 
 ```powershell
 .\dist\RouteAnalysis\RouteAnalysis.exe --smoke-test
 if ($LASTEXITCODE -ne 0) { throw "smoke test failed" }
 ```
 
+Linux x64：
+
+```bash
+./scripts/build.sh
+```
+
+发布目录为 `dist/RouteAnalysis/`，入口为 `RouteAnalysis`。`build.sh` 依次执行架构与 glibc 基线检查、pytest、Ruff、mypy、PyInstaller 构建、ELF 产物校验，然后先用 `QT_QPA_PLATFORM=offscreen` 跑一次打包烟雾，再在检测到显示会话时用真实平台插件跑第二次；没有显示会话时跳过第二次并告警说明平台插件未经验证。最后打印产物文件数、总字节数、入口可执行文件的 SHA-256 和运行基线。
+
+PyInstaller 不做交叉编译：Linux 发布物必须在 Linux 上构建，Windows 发布物必须在 Windows 上构建。Linux 产物动态链接构建机的 glibc，只能在同版本或更新的发行版上启动；当前基线为 x86_64 加 glibc 2.43。构建机没有安装 UPX 时 PyInstaller 会自动跳过压缩，产物体积因此大于 Windows 版。
+
+单独验证 Linux 发布物：
+
+```bash
+./dist/RouteAnalysis/RouteAnalysis --smoke-test && echo "smoke test passed"
+```
+
 ## 运行期数据与安全说明
 
-源码版数据位于仓库 `data/`，日志位于同级 `log/`；打包版位于 EXE 同级同名目录：
+源码版数据位于仓库 `data/`，日志位于同级 `log/`；打包版位于入口可执行文件同级同名目录：
 
 ```text
 data/
