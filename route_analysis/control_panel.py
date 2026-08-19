@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -47,14 +47,58 @@ CORNER_LABELS = {
 }
 
 
-def _coordinate_spin() -> QDoubleSpinBox:
-    spin = QDoubleSpinBox()
-    spin.setRange(-1_000_000, 1_000_000)
-    spin.setDecimals(4)
+_SPIN_WIDTH_FLOOR = 115
+
+
+def _displayed_spin_width(spin: QDoubleSpinBox) -> int:
+    """Return the width the resting value needs under the font actually in use."""
+
+    metrics = spin.fontMetrics()
+
+    def rendered(value: float) -> int:
+        return metrics.horizontalAdvance(
+            f"{spin.prefix()}{spin.textFromValue(value)}{spin.suffix()}"
+        )
+
+    widest = max(rendered(spin.minimum()), rendered(spin.maximum()))
+    chrome = spin.sizeHint().width() - widest
+    resting = 0.0 if spin.minimum() <= 0 <= spin.maximum() else spin.minimum()
+    return rendered(resting) + chrome
+
+
+class _CoordinateSpinBox(QDoubleSpinBox):
+    """Coordinate input that stays compact without clipping the value it shows.
+
+    The cap keeps the historical width unless the active font needs more room, so
+    fonts wider than the Windows baseline neither truncate the value nor the
+    suffix. It is refreshed on font and style changes because a stylesheet may
+    arrive after construction.
+    """
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in {QEvent.Type.FontChange, QEvent.Type.StyleChange}:
+            self.fit_width()
+
+    def fit_width(self) -> None:
+        self.setMaximumWidth(max(_SPIN_WIDTH_FLOOR, _displayed_spin_width(self)))
+
+
+def _coordinate_spin(
+    *,
+    minimum: float = -1_000_000,
+    maximum: float = 1_000_000,
+    decimals: int = 4,
+    suffix: str = "",
+) -> _CoordinateSpinBox:
+    spin = _CoordinateSpinBox()
+    spin.setRange(minimum, maximum)
+    spin.setDecimals(decimals)
+    spin.setSuffix(suffix)
     spin.setSingleStep(0.1)
     spin.setKeyboardTracking(False)
     spin.setMinimumWidth(72)
-    spin.setMaximumWidth(115)
+    spin.fit_width()
     return spin
 
 
@@ -165,10 +209,9 @@ class ControlPanel(QScrollArea):
         layout.addLayout(isolate)
         direction_row = QHBoxLayout()
         direction_row.addWidget(QLabel("地图方向"))
-        self.direction_spin = _coordinate_spin()
-        self.direction_spin.setRange(-1000, 1000)
-        self.direction_spin.setDecimals(6)
-        self.direction_spin.setSuffix(" rad")
+        self.direction_spin = _coordinate_spin(
+            minimum=-1000, maximum=1000, decimals=6, suffix=" rad"
+        )
         self.direction_spin.setAccessibleName("地图显示方向弧度")
         self.direction_spin.valueChanged.connect(self.direction_changed)
         direction_row.addWidget(self.direction_spin)
@@ -236,13 +279,9 @@ class ControlPanel(QScrollArea):
         properties = QFormLayout()
         self.name_edit = QLineEdit()
         self.name_edit.editingFinished.connect(self._name_changed)
-        self.length_spin = _coordinate_spin()
-        self.length_spin.setRange(0, 1_000_000)
-        self.length_spin.setSuffix(" m")
+        self.length_spin = _coordinate_spin(minimum=0, maximum=1_000_000, suffix=" m")
         self.length_spin.editingFinished.connect(self._length_changed)
-        self.width_spin = _coordinate_spin()
-        self.width_spin.setRange(0, 1000)
-        self.width_spin.setSuffix(" m")
+        self.width_spin = _coordinate_spin(minimum=0, maximum=1000, suffix=" m")
         self.width_spin.valueChanged.connect(self._draft_width_changed)
         self.width_spin.editingFinished.connect(self._width_changed)
         self.enabled_check = QCheckBox("参与可通行区域并集")
@@ -308,9 +347,9 @@ class ControlPanel(QScrollArea):
         c2.addWidget(self.control_spins[3])
         segment_form.addRow("控制点 1", c1)
         segment_form.addRow("控制点 2", c2)
-        self.arc_radius_spin = _coordinate_spin()
-        self.arc_radius_spin.setRange(0.0001, 1_000_000)
-        self.arc_radius_spin.setSuffix(" m")
+        self.arc_radius_spin = _coordinate_spin(
+            minimum=0.0001, maximum=1_000_000, suffix=" m"
+        )
         self.arc_radius_spin.valueChanged.connect(self._arc_radius_changed)
         segment_form.addRow("圆弧半径", self.arc_radius_spin)
         layout.addLayout(segment_form)
