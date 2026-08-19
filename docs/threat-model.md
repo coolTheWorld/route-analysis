@@ -29,13 +29,13 @@
 
 ## 已接受风险：明文密码
 
-用户明确要求不增加加密，密码按 [ADR 0001](adr/0001-store-credentials-in-plaintext.md) 明文保存在 `data/config.json`。这意味着任何能读取该 Windows 账号文件的进程或用户都能取得密码。
+用户明确要求不增加加密，密码按 [ADR 0001](adr/0001-store-credentials-in-plaintext.md) 明文保存在 `data/config.json`。这意味着任何能读取该文件的进程或用户都能取得密码：Windows 上是该账号可读的进程或用户，Linux 上是对文件具备读权限的进程或用户。
 
 操作要求：
 
 - 仅安装在受信任工作站；不要将整个 `data/` 发送、同步或提交到版本库。
 - 使用权限最小化的只读调度账号。
-- 通过 Windows ACL 限制发布目录和 `data/` 访问。
+- 限制发布目录和 `data/` 的访问：Windows 使用 ACL；Linux 依赖文件属主与权限位，建议对 `data/` 与 `log/` 执行 `chmod 700`，并确认 umask 不会把新建文件放宽给同组或其他用户。
 - 设备丢失、账号失陷或误传配置后立即更换密码。
 
 ## 已接受风险：未脱敏 DEBUG 日志
