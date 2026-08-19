@@ -1,17 +1,25 @@
 import math
 
 import pytest
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsEllipseItem,
+    QGraphicsItem,
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsTextItem,
+    QStyleOptionGraphicsItem,
 )
 from pytestqt.qtbot import QtBot
 
-from route_analysis.canvas import RouteCanvas
+from route_analysis.canvas import (
+    PATH_POINT_CROWDING_FACTOR,
+    PathPointsItem,
+    RouteCanvas,
+    marker_diameters,
+)
 from route_analysis.lane_generation import BendMode, generate_lane
 from route_analysis.models import (
     JoinStyle,
@@ -31,6 +39,16 @@ def layout() -> LaneLayout:
         "42",
         [Lane.create("lane-1", "主车道", 2, [Point2D(0, 0), Point2D(3, 0)])],
     )
+
+
+def _path_points_items(canvas: RouteCanvas) -> list[QGraphicsItem]:
+    return [item for item in canvas.scene().items() if item.data(0) == "path-points"]
+
+
+def _path_points_item(canvas: RouteCanvas, path_name: str) -> PathPointsItem:
+    item = next(item for item in _path_points_items(canvas) if item.data(1) == path_name)
+    assert isinstance(item, PathPointsItem)
+    return item
 
 
 def _draft_path(canvas: RouteCanvas, tag: str) -> QGraphicsPathItem:
@@ -584,3 +602,142 @@ def test_dragging_lane_over_path_moves_lane_instead_of_selecting_point(qtbot: Qt
     assert moved.anchors[0].point.x == pytest.approx(2, abs=0.05)
     assert moved.anchors[0].point.y == pytest.approx(2, abs=0.05)
     assert canvas.selected_path_point is None
+
+
+def test_centerline_layer_marks_pose_points_and_drops_them_with_the_layer(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_paths(
+        (PosePoint(0, 0, 0), PosePoint(1, 0, 0)),
+        (PosePoint(0, 1, 0),),
+        VehicleDimensions(1, 1, 1),
+    )
+
+    assert len(_path_points_items(canvas)) == 2
+
+    canvas.set_path_layer("actual", centerline=False)
+
+    assert len(_path_points_items(canvas)) == 1
+
+    canvas.set_path_layer("dispatched", centerline=False)
+
+    assert _path_points_items(canvas) == []
+
+
+def test_switching_active_path_restyles_the_pose_point_markers(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    canvas.set_paths(
+        (PosePoint(0, 0, 0),),
+        (PosePoint(0, 1, 0),),
+        VehicleDimensions(1, 1, 1),
+    )
+
+    assert _path_points_item(canvas, "dispatched").active
+    assert not _path_points_item(canvas, "actual").active
+
+    canvas.set_active_path("actual")
+
+    assert not _path_points_item(canvas, "dispatched").active
+    assert _path_points_item(canvas, "actual").active
+
+
+def test_marker_diameters_returns_one_positive_diameter_per_point() -> None:
+    points = [Point2D(index * 0.01, 0) for index in range(200)]
+
+    diameters = marker_diameters(points, 12.5, 7.0, 1.4)
+
+    assert len(diameters) == len(points)
+    assert all(diameter > 0 for diameter in diameters)
+
+
+def test_marker_diameters_keeps_the_base_size_where_points_are_sparse() -> None:
+    points = [Point2D(index * 3.0, 0) for index in range(4)]
+
+    assert marker_diameters(points, 12.5, 7.0, 1.4) == (7.0, 7.0, 7.0, 7.0)
+
+
+def test_marker_diameters_shrink_with_the_screen_gap_where_points_are_crowded() -> None:
+    points = [Point2D(index * 0.2, 0) for index in range(3)]
+
+    # 0.2 m at 20 px/m is a 4 px gap, well under the 7 px base.
+    expected = 4.0 * PATH_POINT_CROWDING_FACTOR
+    assert marker_diameters(points, 20.0, 7.0, 1.4) == (expected, expected, expected)
+
+
+def test_marker_diameters_use_the_tighter_of_the_two_neighbour_gaps() -> None:
+    points = [Point2D(0, 0), Point2D(0.1, 0), Point2D(3.0, 0)]
+
+    diameters = marker_diameters(points, 20.0, 7.0, 1.4)
+
+    # The middle point is 2 px from its left neighbour and 58 px from its right one.
+    assert diameters[1] == pytest.approx(2.0 * PATH_POINT_CROWDING_FACTOR)
+    assert diameters[2] == 7.0
+
+
+def test_marker_diameters_floor_coincident_points_instead_of_dropping_them() -> None:
+    points = [Point2D(0, 0), Point2D(0, 0), Point2D(1, 0)]
+
+    diameters = marker_diameters(points, 500.0, 7.0, 1.4)
+
+    assert len(diameters) == 3
+    assert diameters[0] == 1.4
+    assert diameters[1] == 1.4
+
+
+def test_marker_diameters_keep_degenerate_input_at_the_base_size() -> None:
+    points = [Point2D(index * 0.1, 0) for index in range(4)]
+
+    assert marker_diameters([], 20.0, 7.0, 1.4) == ()
+    assert marker_diameters([Point2D(0, 0)], 20.0, 7.0, 1.4) == (7.0,)
+    assert marker_diameters(points, 0.0, 7.0, 1.4) == (7.0, 7.0, 7.0, 7.0)
+    assert marker_diameters(points, math.inf, 7.0, 1.4) == (7.0, 7.0, 7.0, 7.0)
+
+
+def _drawn_marker_count(item: PathPointsItem, pixels_per_meter: float, width: int) -> int:
+    """Paint the item onto a white strip and count the separate coloured runs."""
+    image = QImage(width, 40, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("#ffffff"))
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.translate(4, 20)
+    painter.scale(pixels_per_meter, -pixels_per_meter)
+    option = QStyleOptionGraphicsItem()
+    option.exposedRect = QRectF(-1e6, -1e6, 2e6, 2e6)
+    item.paint(painter, option, None)
+    painter.end()
+    runs = 0
+    inside = False
+    for x in range(width):
+        painted = QColor(image.pixelColor(x, 20)) != QColor("#ffffff")
+        if painted and not inside:
+            runs += 1
+        inside = painted
+    return runs
+
+
+def test_every_pose_point_is_drawn_as_its_own_marker(qtbot: QtBot) -> None:
+    points = [Point2D(index * 1.0, 0) for index in range(9)]
+    item = PathPointsItem(
+        points,
+        QColor("#2474d8"),
+        active=True,
+        hollow_indices=frozenset(),
+    )
+
+    assert _drawn_marker_count(item, 30.0, 280) == len(points)
+
+
+def test_crowded_pose_points_shrink_but_all_of_them_are_still_drawn(qtbot: QtBot) -> None:
+    # 0.25 m apart at 30 px/m is a 7.5 px gap, so markers shrink below the 7 px base.
+    points = [Point2D(index * 0.25, 0) for index in range(20)]
+    item = PathPointsItem(
+        points,
+        QColor("#2474d8"),
+        active=True,
+        hollow_indices=frozenset(),
+    )
+
+    assert _drawn_marker_count(item, 30.0, 180) == len(points)
