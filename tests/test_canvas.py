@@ -626,6 +626,50 @@ def test_centerline_layer_marks_pose_points_and_drops_them_with_the_layer(
     assert _path_points_items(canvas) == []
 
 
+def test_clicking_path_point_under_a_lane_anchor_still_selects_the_point(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.load_layout(layout())
+    canvas.set_snap_enabled(False)
+    canvas.set_paths((PosePoint(3, 0, 0),), (), VehicleDimensions(1, 1, 1))
+    point = canvas.mapFromScene(3, 0)
+
+    with qtbot.waitSignal(canvas.path_point_selected, timeout=1000) as selected:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    assert selected.args == ["dispatched", 0]
+    assert canvas.selected_path_point == ("dispatched", 0)
+    assert canvas.current_layout().lanes[0].anchors[1].point == Point2D(3, 0)
+    assert canvas.undo_stack.count() == 0
+
+
+def test_dragging_lane_anchor_off_a_path_point_does_not_select_the_point(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    canvas.load_layout(layout())
+    canvas.set_snap_enabled(False)
+    canvas.set_paths((PosePoint(3, 0, 0),), (), VehicleDimensions(1, 1, 1))
+    start = canvas.mapFromScene(3, 0)
+    end = canvas.mapFromScene(3, 2)
+
+    qtbot.mousePress(canvas.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas.viewport(), pos=end)
+    qtbot.mouseRelease(canvas.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    moved = canvas.current_layout().lanes[0]
+    assert moved.anchors[1].point.y == pytest.approx(2, abs=0.05)
+    assert canvas.selected_path_point is None
+    assert canvas.undo_stack.count() == 1
+
+
 def test_switching_active_path_restyles_the_pose_point_markers(qtbot: QtBot) -> None:
     canvas = RouteCanvas()
     qtbot.addWidget(canvas)

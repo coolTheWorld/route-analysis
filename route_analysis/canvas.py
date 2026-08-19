@@ -1015,7 +1015,7 @@ class RouteCanvas(QGraphicsView):
             candidates = self._path_point_candidates(self._active_path_name, raw)
             target = self._hit_test(raw)
             if target is not None:
-                if candidates and target.kind == "lane":
+                if candidates:
                     self._pending_path_click = (
                         self._active_path_name,
                         tuple(candidates),
