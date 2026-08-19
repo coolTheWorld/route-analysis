@@ -26,13 +26,37 @@ from route_analysis.turn_measurements import (
 )
 
 
+WINDOWS_FONT_FILE = "C:/Windows/Fonts/msyh.ttc"
+PREVIEW_FONT_FAMILIES = (
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "WenQuanYi Zen Hei",
+)
+
+
+def select_preview_font() -> QFont:
+    """Return an installed CJK family so the preview never renders tofu blocks."""
+
+    if sys.platform == "win32":
+        QFontDatabase.addApplicationFont(WINDOWS_FONT_FILE)
+    families = set(QFontDatabase.families())
+    for family in PREVIEW_FONT_FAMILIES:
+        if family in families:
+            return QFont(family, 9)
+    fallback = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    fallback.setPointSize(9)
+    return fallback
+
+
 def main() -> int:
     output = Path(sys.argv[1] if len(sys.argv) > 1 else "build/release-preview.png")
     output.parent.mkdir(parents=True, exist_ok=True)
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication([])
-    QFontDatabase.addApplicationFont("C:/Windows/Fonts/msyh.ttc")
-    app.setFont(QFont("Microsoft YaHei", 9))
+    font = select_preview_font()
+    print(f"Preview font family: {font.family()}")
+    app.setFont(font)
     app.setStyle("Fusion")
     app.setStyleSheet(APPLICATION_STYLESHEET)
 

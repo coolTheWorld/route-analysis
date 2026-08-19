@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import math
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 from uuid import uuid4
@@ -23,7 +23,15 @@ from PySide6.QtGui import (
     QUndoStack,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsScene, QGraphicsView, QMenu
+from PySide6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsPathItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QMenu,
+    QStyleOptionGraphicsItem,
+    QWidget,
+)
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry.base import BaseGeometry
@@ -49,6 +57,138 @@ from route_analysis.models import (
 from route_analysis.radius_graphics import add_whole_turn_graphics
 from route_analysis.storage import LaneLayout
 from route_analysis.turn_radius import TurnRadiusSection
+
+PATH_POINT_DIAMETER_PX = 7.0
+INACTIVE_PATH_POINT_DIAMETER_PX = 5.0
+PATH_POINT_MIN_DIAMETER_PX = 1.4
+PATH_POINT_CROWDING_FACTOR = 0.8
+
+
+def marker_diameters(
+    points: Sequence[Point2D],
+    pixels_per_meter: float,
+    base_px: float,
+    minimum_px: float,
+) -> tuple[float, ...]:
+    """Return one on-screen marker diameter per point, one marker per point always.
+
+    Crowded stretches shrink their markers towards ``minimum_px`` instead of dropping
+    any of them, so the returned tuple always has exactly one positive diameter per
+    point and the drawn marker count matches the path point count at every zoom level.
+    """
+    count = len(points)
+    if count == 0:
+        return ()
+    if count == 1 or not math.isfinite(pixels_per_meter) or pixels_per_meter <= 0:
+        return (base_px,) * count
+    gaps = [
+        math.hypot(
+            points[index + 1].x - points[index].x,
+            points[index + 1].y - points[index].y,
+        )
+        * pixels_per_meter
+        for index in range(count - 1)
+    ]
+    diameters = []
+    for index in range(count):
+        neighbours = gaps[index - 1 : index + 1] if index else gaps[:1]
+        crowding = min(neighbours) * PATH_POINT_CROWDING_FACTOR
+        diameters.append(min(base_px, max(minimum_px, crowding)))
+    return tuple(diameters)
+
+
+class PathPointsItem(QGraphicsItem):
+    """Draw a marker for every pose point of one path, shrinking them where crowded.
+
+    No point is ever dropped: sparse stretches keep the full marker diameter and dense
+    stretches shrink towards the minimum, so the drawn marker count always equals the
+    path point count. Points outside the exposed viewport rect are clipped, not dropped.
+    """
+
+    _BOUNDS_PADDING_METRES = 2.0
+
+    def __init__(
+        self,
+        points: Sequence[Point2D],
+        color: QColor,
+        *,
+        active: bool,
+        hollow_indices: frozenset[int],
+    ) -> None:
+        super().__init__()
+        self._points = tuple(points)
+        self._color = QColor(color)
+        self._active = active
+        self._hollow_indices = hollow_indices
+        self._bounds = self._compute_bounds()
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def _compute_bounds(self) -> QRectF:
+        if not self._points:
+            return QRectF()
+        padding = self._BOUNDS_PADDING_METRES
+        left = min(point.x for point in self._points)
+        right = max(point.x for point in self._points)
+        bottom = min(point.y for point in self._points)
+        top = max(point.y for point in self._points)
+        return QRectF(
+            left - padding,
+            bottom - padding,
+            right - left + 2 * padding,
+            top - bottom + 2 * padding,
+        )
+
+    def boundingRect(self) -> QRectF:
+        return self._bounds
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        if not self._points:
+            return
+        transform = painter.transform()
+        pixels_per_meter = math.hypot(transform.m11(), transform.m12())
+        if pixels_per_meter <= 0:
+            return
+        base = PATH_POINT_DIAMETER_PX if self._active else INACTIVE_PATH_POINT_DIAMETER_PX
+        diameters = marker_diameters(
+            self._points,
+            pixels_per_meter,
+            base,
+            PATH_POINT_MIN_DIAMETER_PX,
+        )
+        margin = base / 2 / pixels_per_meter
+        exposed = option.exposedRect.adjusted(-margin, -margin, margin, margin)
+        solid: list[tuple[QPointF, float]] = []
+        hollow: list[tuple[QPointF, float]] = []
+        for index, point in enumerate(self._points):
+            center = QPointF(point.x, point.y)
+            if not exposed.contains(center):
+                continue
+            radius = diameters[index] / 2 / pixels_per_meter
+            has_yaw = index not in self._hollow_indices
+            (solid if self._active and has_yaw else hollow).append((center, radius))
+        if solid:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(self._color))
+            for center, radius in solid:
+                painter.drawEllipse(center, radius, radius)
+        if hollow:
+            outline = QColor(self._color)
+            if not self._active:
+                outline.setAlpha(120)
+            pen = QPen(outline, 1.6 if self._active else 1.2)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            for center, radius in hollow:
+                painter.drawEllipse(center, radius, radius)
 
 
 @dataclass(slots=True)
@@ -326,6 +466,7 @@ class RouteCanvas(QGraphicsView):
             raise ValueError(f"unknown path: {path_name}")
         self._active_path_name = path_name
         self._last_path_click = None
+        self._rebuild_scene()
 
     def select_path_point(
         self,
@@ -874,7 +1015,7 @@ class RouteCanvas(QGraphicsView):
             candidates = self._path_point_candidates(self._active_path_name, raw)
             target = self._hit_test(raw)
             if target is not None:
-                if candidates and target.kind == "lane":
+                if candidates:
                     self._pending_path_click = (
                         self._active_path_name,
                         tuple(candidates),
@@ -1164,8 +1305,20 @@ class RouteCanvas(QGraphicsView):
             for pose in points[1:]:
                 display = self.to_display(Point2D(pose.x, pose.y))
                 path.lineTo(display.x, display.y)
-            route_item = self.scene().addPath(path, self._cosmetic_pen(color, 2.2))
+            route_item = self.scene().addPath(path, self._cosmetic_pen(color, 1.2))
             route_item.setZValue(5)
+            points_item = PathPointsItem(
+                [self.to_display(Point2D(pose.x, pose.y)) for pose in points],
+                color,
+                active=name == self._active_path_name,
+                hollow_indices=frozenset(
+                    index for index, pose in enumerate(points) if pose.yaw is None
+                ),
+            )
+            points_item.setZValue(7)
+            points_item.setData(0, "path-points")
+            points_item.setData(1, name)
+            self.scene().addItem(points_item)
 
         if visibility.vehicles and self._dimensions is not None:
             fill = QColor(color)
