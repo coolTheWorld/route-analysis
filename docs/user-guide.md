@@ -2,7 +2,7 @@
 
 ## 首次运行
 
-1. 启动 `RouteAnalysis.exe` 或运行 `scripts\run.ps1`。
+1. 启动打包版入口（Windows 为 `RouteAnalysis.exe`，Linux 为 `RouteAnalysis`），或从源码运行 `scripts\run.cmd`（Windows）、`scripts/run.sh`（Linux）。
 2. 首次设置至少填写车宽、中心前距、中心后距和新车道默认总宽，均使用米且必须大于 0。
 3. 连接页填写完整 API 根地址（例如 `http://host/admin-api`）、租户、用户名和密码。租户默认 `suntae`。
 4. 地图方向使用弧度，默认 0。0 表示原始正 X/东显示为屏幕向右。
@@ -109,7 +109,7 @@
 
 ## 本地日志
 
-- 源码运行写入仓库同级 `log/`；打包运行写入 EXE 同级 `log/`。当前文件为 `route-analysis.log`。
+- 源码运行写入仓库同级 `log/`；打包运行写入入口可执行文件同级 `log/`。当前文件为 `route-analysis.log`。
 - 默认 INFO；在高级设置改为 DEBUG/INFO/WARNING/ERROR 后立即生效并保存。
 - 日志在本地日期变化或当前文件达到 20 MiB 时轮转，保留最近 30 个历史文件。日志暂不可写时状态栏持续显示“日志不可用”，后续事件会自动重试。
 - INFO 记录生命周期、加载/保存/分析摘要和耗时。DEBUG 按已确认决策原样记录密码、令牌、Authorization/tenant 请求头、完整配置、请求参数、响应正文、路径坐标和导入文件正文，不脱敏、不加密。
@@ -117,8 +117,8 @@
 
 ## 文件位置
 
-源码启动：`route-analysis\data\` 和 `route-analysis\log\`。
-打包启动：`RouteAnalysis.exe` 同级 `data\` 和 `log\`。
+源码启动：`route-analysis/data/` 和 `route-analysis/log/`。
+打包启动：入口可执行文件（Windows 为 `RouteAnalysis.exe`，Linux 为 `RouteAnalysis`）同级的 `data/` 和 `log/`。
 
 车道文件按服务器和 mapId 隔离，因此不同后端或地图不会自动共用布局。
 

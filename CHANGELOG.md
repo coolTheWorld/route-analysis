@@ -1,5 +1,17 @@
 # 变更记录
 
+## 未发布
+
+### 新增
+
+- 新增 Linux 脚本 `scripts/bootstrap.sh`、`scripts/run.sh` 和 `scripts/build.sh`：环境准备按 `python3.12`、`python3.13`、`python3.14`、`python3` 顺序选取第一个满足 `>=3.12,<3.15` 的解释器并打印实际版本；启动脚本转发全部命令行参数，并在既无显示会话又未指定 `QT_QPA_PLATFORM` 时提前报错；构建脚本在既有质量门禁之外增加架构与 glibc 基线检查、ELF 产物校验、离屏与真实平台两次打包烟雾，并输出产物文件数、总字节数和入口可执行文件 SHA-256。
+- Linux x64（x86_64 加 glibc 2.43 基线）成为第二个受支持发布平台，与 Windows x64 共用 `route-analysis.spec` 及文件夹模式发布物；决策记录见 [ADR 0006](docs/adr/0006-support-linux-as-a-second-release-platform.md)。
+
+### 变更
+
+- `scripts/render_release_preview.py` 改为按平台选择中文字体，不再硬编码 Windows 字体文件路径。
+- README、用户手册、规格说明和威胁模型同步两个平台的准备命令、发布路径与访问控制缓解措施。
+
 ## 0.5.0 - 2026-08-16
 
 ### 新增

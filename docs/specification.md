@@ -191,5 +191,5 @@
 
 - 全部源代码和测试。
 - README、用户手册、架构说明、API 契约、威胁模型、ADR 和变更记录。
-- PowerShell 源码启动脚本。
-- PyInstaller Windows x64 文件夹模式构建脚本和可验证发布物。
+- 源码准备与启动脚本：Windows 使用 PowerShell，Linux 使用 Bash。
+- PyInstaller 文件夹模式构建脚本和可验证发布物，覆盖 Windows x64 与 Linux x64（x86_64 加 glibc 2.43 基线）两个平台；两个平台共用同一份 spec，各自在本平台构建。
