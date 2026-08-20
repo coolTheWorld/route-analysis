@@ -8,6 +8,7 @@ from route_analysis.clearance_geometry import (
     build_corner_poses,
     corner_radii,
     fit_corner,
+    lane_centreline_through,
     offset_profile,
     solve_offset_radius,
     swept_band_width,
@@ -188,3 +189,41 @@ def test_build_corner_poses_rejects_infeasible_degrees_of_freedom() -> None:
     corner = fit_corner(poses, start_index=0, end_index=len(poses) - 1)
     assert corner is not None
     assert build_corner_poses(corner, arc_start_shift=5.0) is None
+
+
+def test_lane_centreline_falls_back_to_the_sharp_corner_without_a_fillet() -> None:
+    poses = _arc_poses(1.00, math.pi / 2)
+    corner = fit_corner(poses, start_index=0, end_index=len(poses) - 1)
+    assert corner is not None
+    points = lane_centreline_through(corner, None)
+    assert len(points) == 3
+    assert points[1] == pytest.approx((1.0, 0.0), abs=1e-9)
+
+
+def test_lane_centreline_draws_the_fillet_it_was_given() -> None:
+    poses = _arc_poses(1.00, math.pi / 2)
+    corner = fit_corner(poses, start_index=0, end_index=len(poses) - 1)
+    assert corner is not None
+    points = lane_centreline_through(corner, 1.60, leg=2.0, steps=32)
+    assert len(points) == 35
+    # Tangent length for a right-angle fillet equals the radius, measured from the vertex.
+    assert math.dist(points[1], (1.0, 0.0)) == pytest.approx(1.60, abs=1e-9)
+    assert math.dist(points[-2], (1.0, 0.0)) == pytest.approx(1.60, abs=1e-9)
+    centre = (points[1][0], points[1][1] + 1.60)
+    for point in points[1:-1]:
+        assert math.dist(point, centre) == pytest.approx(1.60, abs=1e-9)
+
+
+def test_a_wider_lane_fillet_bulges_further_from_the_corner_than_the_path() -> None:
+    poses = _arc_poses(1.00, math.pi / 2)
+    corner = fit_corner(poses, start_index=0, end_index=len(poses) - 1)
+    assert corner is not None
+    vertex = corner.corner_point
+    assert vertex is not None
+    lane = lane_centreline_through(corner, 1.60, leg=0.5, steps=64)
+    path = lane_centreline_through(corner, 1.00, leg=0.5, steps=64)
+    lane_apex = min(math.dist(point, (vertex.x, vertex.y)) for point in lane)
+    path_apex = min(math.dist(point, (vertex.x, vertex.y)) for point in path)
+    assert lane_apex - path_apex == pytest.approx(
+        apex_offset(1.60, math.pi / 2) - apex_offset(1.00, math.pi / 2), abs=1e-3
+    )

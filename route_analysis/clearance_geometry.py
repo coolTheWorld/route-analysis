@@ -284,6 +284,54 @@ def solve_offset_radius(
     return radius
 
 
+def lane_centreline_through(
+    corner: FittedCorner,
+    radius: float | None,
+    *,
+    leg: float = 4.0,
+    steps: int = 48,
+) -> list[tuple[float, float]]:
+    """World-space line-arc-line for the lane centreline through this corner.
+
+    Drawing the lane as a sharp corner when its fillet radius is known would hide the one
+    thing the plan view exists to show: where the two centrelines separate and by how much.
+    """
+
+    entry_normal = _left_normal(corner.entry_heading)
+    entry_direction = (math.cos(corner.entry_heading), math.sin(corner.entry_heading))
+    exit_direction = (math.cos(corner.exit_heading), math.sin(corner.exit_heading))
+    vertex = corner.corner_point
+    if vertex is None or radius is None or radius <= MINIMUM_RADIUS:
+        points = [(corner.entry_point.x, corner.entry_point.y)]
+        if vertex is not None:
+            points.append((vertex.x, vertex.y))
+        points.append((corner.exit_point.x, corner.exit_point.y))
+        return points
+
+    length = tangent_length(radius, corner.deflection)
+    start = (vertex.x - length * entry_direction[0], vertex.y - length * entry_direction[1])
+    centre = (
+        start[0] + corner.sign * radius * entry_normal[0],
+        start[1] + corner.sign * radius * entry_normal[1],
+    )
+    points = [
+        (start[0] - leg * entry_direction[0], start[1] - leg * entry_direction[1]),
+        start,
+    ]
+    radial = (start[0] - centre[0], start[1] - centre[1])
+    for index in range(1, steps + 1):
+        angle = corner.deflection * index / steps
+        points.append(
+            (
+                centre[0] + radial[0] * math.cos(angle) - radial[1] * math.sin(angle),
+                centre[1] + radial[0] * math.sin(angle) + radial[1] * math.cos(angle),
+            )
+        )
+    end = points[-1]
+    points.append((end[0] + leg * exit_direction[0], end[1] + leg * exit_direction[1]))
+    return points
+
+
 @dataclass(frozen=True, slots=True)
 class CornerSolution:
     """One realisable corner geometry produced by the three degrees of freedom."""
