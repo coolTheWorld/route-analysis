@@ -405,7 +405,8 @@ class ClearanceOverview(QWidget):
         self._inputs: ClearanceInputs | None = None
         self._selected: int | None = None
         self._zones: dict[int, WidthZones | None] = {}
-        self._row_targets: dict[int, Bottleneck] = {}
+        self._by_segment: dict[int, Bottleneck] = {}
+        self._ruler_row: int | None = None
         self._zone_messages: dict[int, str] = {}
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
@@ -454,10 +455,14 @@ class ClearanceOverview(QWidget):
         header = QHBoxLayout()
         title = QLabel("瓶颈排行榜")
         title.setObjectName("clearanceSectionTitle")
-        hint = QLabel("选中行下方给出该处三区标尺 · 双击进入转角求解")
+        hint = QLabel("选中行下方给出该处三区标尺")
         hint.setObjectName("clearanceSectionHint")
         header.addWidget(title)
         header.addWidget(hint, 1)
+        self.corner_button = QPushButton("进入转角求解")
+        self.corner_button.setEnabled(False)
+        self.corner_button.clicked.connect(self._open_selected_corner)
+        header.addWidget(self.corner_button)
         column.addLayout(header)
 
         self.table = QTableWidget(0, 6)
@@ -569,16 +574,20 @@ class ClearanceOverview(QWidget):
         return None
 
     def _refresh_table(self) -> None:
+        """Rebuild every row. Only called when the analysis changes, never on selection:
+        clearing the table mid-gesture destroys the items a double click is tracking."""
+
         self.table.blockSignals(True)
         self.table.clearContents()
         self.table.setRowCount(0)
-        self._row_targets.clear()
+        self._by_segment.clear()
+        self._ruler_row = None
         analysis = self._analysis
         if analysis is not None:
             for bottleneck in analysis.bottlenecks:
                 row = self.table.rowCount()
                 self.table.insertRow(row)
-                self._row_targets[row] = bottleneck
+                self._by_segment[bottleneck.segment.index] = bottleneck
                 cells = (
                     str(bottleneck.rank),
                     format_length(bottleneck.clearance, signed=True),
@@ -590,6 +599,7 @@ class ClearanceOverview(QWidget):
                 tint = self._row_tint(bottleneck)
                 for column, text in enumerate(cells):
                     item = QTableWidgetItem(text)
+                    item.setData(Qt.ItemDataRole.UserRole, bottleneck.segment.index)
                     if column in (0, 1, 5):
                         item.setTextAlignment(
                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -597,19 +607,54 @@ class ClearanceOverview(QWidget):
                     if tint is not None:
                         item.setBackground(tint)
                     self.table.setItem(row, column, item)
-                if self._selected == bottleneck.segment.index:
-                    ruler_row = self.table.rowCount()
-                    self.table.insertRow(ruler_row)
-                    self.table.setSpan(ruler_row, 0, 1, 6)
-                    ruler = _RulerView()
-                    ruler.show_zones(
-                        self._zones.get(self._selected),
-                        self._zone_messages.get(self._selected, "正在计算需求道宽…"),
-                    )
-                    self.table.setCellWidget(ruler_row, 0, ruler)
-                    self.table.setRowHeight(ruler_row, RULER_HEIGHT)
-                    self.table.selectRow(row)
         self.table.blockSignals(False)
+        self._sync_ruler()
+
+    def _segment_at(self, row: int) -> int | None:
+        item = self.table.item(row, 0)
+        value = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        return value if isinstance(value, int) else None
+
+    def _row_of(self, segment_index: int) -> int | None:
+        for row in range(self.table.rowCount()):
+            if self._segment_at(row) == segment_index:
+                return row
+        return None
+
+    def _sync_ruler(self) -> None:
+        """Add or move the inline width ruler without disturbing any other row."""
+
+        self.table.blockSignals(True)
+        if self._ruler_row is not None:
+            self.table.removeRow(self._ruler_row)
+            self._ruler_row = None
+        if self._selected is not None:
+            row = self._row_of(self._selected)
+            if row is not None:
+                self.table.insertRow(row + 1)
+                self.table.setSpan(row + 1, 0, 1, 6)
+                ruler = _RulerView()
+                ruler.show_zones(
+                    self._zones.get(self._selected),
+                    self._zone_messages.get(self._selected, "正在计算需求道宽…"),
+                )
+                self.table.setCellWidget(row + 1, 0, ruler)
+                self.table.setRowHeight(row + 1, RULER_HEIGHT)
+                self._ruler_row = row + 1
+        self.table.blockSignals(False)
+        self._refresh_corner_button()
+
+    def _refresh_corner_button(self) -> None:
+        bottleneck = (
+            self._by_segment.get(self._selected) if self._selected is not None else None
+        )
+        self.corner_button.setEnabled(
+            bottleneck is not None and bottleneck.segment.role is SegmentRole.TURN
+        )
+
+    def _open_selected_corner(self) -> None:
+        if self._selected is not None:
+            self.corner_requested.emit(self._selected)
 
     def _refresh_advice(self) -> None:
         while self._advice_holder.count():
@@ -668,23 +713,30 @@ class ClearanceOverview(QWidget):
         self.chart.set_highlight(segment_index)
 
     def _row_selected(self) -> None:
-        rows = {index.row() for index in self.table.selectedIndexes()}
+        segments = {
+            found
+            for index in self.table.selectedIndexes()
+            if (found := self._segment_at(index.row())) is not None
+        }
         bottleneck = next(
-            (self._row_targets.get(row) for row in sorted(rows) if row in self._row_targets),
+            (self._by_segment[value] for value in sorted(segments) if value in self._by_segment),
             None,
         )
-        if bottleneck is None:
+        if bottleneck is None or bottleneck.segment.index == self._selected:
             return
         self._selected = bottleneck.segment.index
         self.chart.set_highlight(self._selected)
         self._request_zones(bottleneck)
-        self._refresh_table()
+        self._sync_ruler()
         # Only position the map; do not switch to it. This row's own payload is the width
         # ruler that just opened underneath it, and leaving the page would destroy it.
         self.pose_selected.emit(bottleneck.pose_index)
 
     def _row_activated(self, item: QTableWidgetItem) -> None:
-        bottleneck = self._row_targets.get(item.row())
+        segment_index = item.data(Qt.ItemDataRole.UserRole)
+        bottleneck = (
+            self._by_segment.get(segment_index) if isinstance(segment_index, int) else None
+        )
         if bottleneck is not None and bottleneck.segment.role is SegmentRole.TURN:
             self.corner_requested.emit(bottleneck.segment.index)
 
@@ -732,14 +784,14 @@ class ClearanceOverview(QWidget):
         else:
             self._zone_messages.pop(index, None)
         if self._selected == index:
-            self._refresh_table()
+            self._sync_ruler()
 
     def _zones_failed(self, message: str) -> None:
         if self._selected is None:
             return
         self._zones[self._selected] = None
         self._zone_messages[self._selected] = message
-        self._refresh_table()
+        self._sync_ruler()
 
 
 class ClearancePanel(QWidget):

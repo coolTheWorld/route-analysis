@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
@@ -14,14 +15,16 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 from route_analysis import __version__
 from route_analysis.canvas import RouteCanvas
 from route_analysis.clearance_panel import ClearanceInputs, ClearancePanel
-from route_analysis.clearance_solver import LaneContext, analyse_clearance
+from route_analysis.clearance_solver import LaneContext, SegmentRole, analyse_clearance
 from route_analysis.control_panel import ControlPanel
-from route_analysis.lane_generation import BendMode, generate_lane
+from route_analysis.lane_generation import BendMode, generate_lane, replace_arc_radius
 from route_analysis.models import (
     AnalysisSettings,
     Lane,
+    LaneSegment,
     Point2D,
     PosePoint,
+    SegmentKind,
     VehicleDimensions,
 )
 from route_analysis.parsing import parse_command_details
@@ -200,9 +203,15 @@ def main() -> int:
     draft_saved = draft_window.grab().save(str(draft_output))
 
     clearance_saved = render_clearance(app, output)
+    corner_saved = render_corner(app, output)
     return (
         0
-        if overview_saved and radius_saved and points_saved and draft_saved and clearance_saved
+        if overview_saved
+        and radius_saved
+        and points_saved
+        and draft_saved
+        and clearance_saved
+        and corner_saved
         else 1
     )
 
@@ -239,6 +248,88 @@ def clearance_scene() -> tuple[tuple[PosePoint, ...], list[Lane], VehicleDimensi
     return tuple(poses), lanes, VehicleDimensions(1.20, 1.00, 1.60)
 
 
+def corner_scene() -> tuple[tuple[PosePoint, ...], list[Lane], VehicleDimensions]:
+    """A lane filleted at R 1.60 with a path that turns at R 1.00 through the same legs.
+
+    The two radii must differ, otherwise the offset-along-the-bend arch is flat and the
+    view has nothing to say.
+    """
+
+    lane = Lane.create(
+        "L", "主通道", 3.2,
+        [Point2D(-10, 0), Point2D(-1.2, 0), Point2D(0.4, 1.6), Point2D(0.4, 11)],
+    )
+    lane.segments[1] = LaneSegment(
+        kind=SegmentKind.ARC, arc_center=Point2D(-1.2, 1.6), clockwise=False
+    )
+    lane = replace_arc_radius(lane, 1, 1.60)
+    poses = [PosePoint(-10 + index * 0.4, 0.0, 0.0) for index in range(24)]
+    for step in range(1, 25):
+        angle = -math.pi / 2 + math.pi / 2 * step / 24
+        poses.append(
+            PosePoint(-0.6 + math.cos(angle), 1.0 + math.sin(angle), angle + math.pi / 2)
+        )
+    poses.extend(PosePoint(0.4, 1.0 + index * 0.4, math.pi / 2) for index in range(1, 26))
+    return tuple(poses), [lane], VehicleDimensions(1.20, 1.00, 1.60)
+
+
+def _wait_for(app: QApplication, ready: Callable[[], bool], timeout_ms: int = 30_000) -> None:
+    """Wait on an idle event loop, never on QTest.qWait.
+
+    A spinning main thread holds the GIL between switch intervals and starves the solver
+    thread so badly that a 40 ms job does not finish inside ten seconds.
+    """
+
+    loop = QEventLoop()
+    QTimer.singleShot(timeout_ms, loop.quit)
+
+    def poll() -> None:
+        if ready():
+            loop.quit()
+            return
+        QTimer.singleShot(50, poll)
+
+    QTimer.singleShot(50, poll)
+    loop.exec()
+    app.processEvents()
+
+
+def render_corner(app: QApplication, output: Path) -> bool:
+    """Grab the corner solver, the one view whose whole point is two unequal radii."""
+
+    poses, lanes, dimensions = corner_scene()
+    settings = AnalysisSettings()
+    analysis = analyse_clearance(poses, dimensions, lanes, settings)
+    if analysis is None:
+        return False
+    turn = next(
+        (item for item in analysis.segments if item.role is SegmentRole.TURN), None
+    )
+    if turn is None:
+        return False
+    panel = ClearancePanel()
+    panel.set_analysis(
+        analysis,
+        ClearanceInputs(
+            poses=poses,
+            dimensions=dimensions,
+            settings=settings,
+            context=LaneContext(lanes, settings),
+            metadata={},
+        ),
+    )
+    window = QMainWindow()
+    window.setWindowTitle(f"Suntae 路径通行分析 {__version__} — 转角求解视觉检查")
+    window.setCentralWidget(panel)
+    window.resize(1240, 860)
+    window.show()
+    app.processEvents()
+    panel._open_corner(turn.index)
+    _wait_for(app, lambda: bool(panel.corner_view._optimum))
+    corner_output = output.with_name(f"{output.stem}-corner{output.suffix}")
+    return bool(window.grab().save(str(corner_output)))
+
+
 def render_clearance(app: QApplication, output: Path) -> bool:
     """Grab the clearance headroom view, so a whole page of UI is not left unwatched."""
 
@@ -265,23 +356,9 @@ def render_clearance(app: QApplication, output: Path) -> bool:
     window.show()
     app.processEvents()
     panel.overview.table.selectRow(0)
-    # The width ruler is solved in a worker thread. Wait on an idle event loop, never on
-    # QTest.qWait: a spinning main thread holds the GIL between switch intervals and
-    # starves the worker so badly that a 40 ms solve does not finish inside ten seconds.
-    loop = QEventLoop()
-    QTimer.singleShot(30_000, loop.quit)
-    QTimer.singleShot(50, lambda: _quit_when_solved(panel, loop))
-    loop.exec()
-    app.processEvents()
+    _wait_for(app, lambda: panel.selected_zones() is not None)
     clearance_output = output.with_name(f"{output.stem}-clearance{output.suffix}")
     return bool(window.grab().save(str(clearance_output)))
-
-
-def _quit_when_solved(panel: ClearancePanel, loop: QEventLoop) -> None:
-    if panel.selected_zones() is not None:
-        loop.quit()
-        return
-    QTimer.singleShot(50, lambda: _quit_when_solved(panel, loop))
 
 
 if __name__ == "__main__":
