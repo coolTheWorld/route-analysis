@@ -258,6 +258,7 @@ class MainWindow(QMainWindow):
         self.canvas_tabs.addTab(self.canvas, "地图")
         self.clearance_panel = ClearancePanel()
         self.clearance_panel.pose_selected.connect(self._clearance_pose_selected)
+        self.clearance_panel.map_requested.connect(self._clearance_map_requested)
         self.clearance_panel.export_csv_requested.connect(self.export_offset_table)
         self.clearance_panel.export_pdf_requested.connect(self.export_clearance_report)
         self.canvas_tabs.addTab(self.clearance_panel, "通行余量")
@@ -1343,14 +1344,33 @@ class MainWindow(QMainWindow):
             ),
         }
 
-    def _clearance_pose_selected(self, pose_index: int) -> None:
+    def _locate_dispatched_pose(self, pose_index: int) -> int | None:
+        """Point the canvas and the point table at one dispatched pose, staying put."""
+
         indices = self._path_documents["dispatched"].pose_source_indices
         if not 0 <= pose_index < len(indices):
-            return
-        self.canvas_tabs.setCurrentIndex(0)
+            return None
         source_index = indices[pose_index]
         self.path_details.select_point("dispatched", source_index, emit_signal=False)
         self._path_detail_selected("dispatched", source_index)
+        return source_index
+
+    def _clearance_pose_selected(self, pose_index: int) -> None:
+        """Selecting a bottleneck positions the map but must not navigate away from it.
+
+        The row's own payload is the width ruler that opens underneath it; switching tabs
+        here would throw the reader off the page that the click just filled in.
+        """
+
+        source_index = self._locate_dispatched_pose(pose_index)
+        if source_index is not None:
+            self.status_label.setText(
+                f"已在地图中定位到点位 {source_index + 1}；切到「地图」标签页查看"
+            )
+
+    def _clearance_map_requested(self, pose_index: int) -> None:
+        if self._locate_dispatched_pose(pose_index) is not None:
+            self.canvas_tabs.setCurrentIndex(0)
 
     def export_offset_table(self) -> None:
         analysis = self.clearance_panel.analysis
