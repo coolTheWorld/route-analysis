@@ -5,12 +5,16 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from shapely.geometry import LineString, Point
 
-from route_analysis.geometry import lane_segment_points, shortest_angle_delta
+from route_analysis.geometry import (
+    envelope_overhang,
+    lane_segment_points,
+    shortest_angle_delta,
+)
 from route_analysis.models import (
     JoinStyle,
     Lane,
@@ -19,6 +23,7 @@ from route_analysis.models import (
     Point2D,
     PosePoint,
     SegmentKind,
+    VehicleDimensions,
 )
 
 MAX_ARC_FIT_SAMPLES = 64
@@ -32,6 +37,13 @@ class BendMode(StrEnum):
     BEZIER = "bezier"
 
 
+class ConnectionMode(StrEnum):
+    """How the two chosen samples are joined into a lane centerline."""
+
+    PATH = "path"
+    STRAIGHT = "straight"
+
+
 @dataclass(frozen=True, slots=True)
 class LaneGenerationMetrics:
     source_points: int
@@ -40,6 +52,8 @@ class LaneGenerationMetrics:
     segments: int
     maximum_deviation: float
     arc_failures: int = 0
+    start_overhang: float = 0.0
+    end_overhang: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -550,6 +564,122 @@ def _maximum_deviation(lane: Lane, source: Sequence[Point2D], tolerance: float) 
         coordinates.append(coordinates[0])
     generated = LineString(coordinates)
     return max((generated.distance(Point(point.x, point.y)) for point in source), default=0.0)
+
+
+def _unit_between(first: Point2D, second: Point2D) -> tuple[float, float] | None:
+    return _unit(second.x - first.x, second.y - first.y)
+
+
+def _leading_direction(points: Sequence[Point2D]) -> tuple[float, float] | None:
+    for point in points[1:]:
+        direction = _unit_between(points[0], point)
+        if direction is not None:
+            return direction
+    return None
+
+
+def _trailing_direction(points: Sequence[Point2D]) -> tuple[float, float] | None:
+    for point in reversed(points[:-1]):
+        direction = _unit_between(point, points[-1])
+        if direction is not None:
+            return direction
+    return None
+
+
+def extend_to_cover(
+    points: Sequence[Point2D],
+    start_pose: PosePoint,
+    end_pose: PosePoint,
+    dimensions: VehicleDimensions,
+) -> tuple[list[Point2D], float, float]:
+    """Grow a centerline at both ends until it spans both end footprints.
+
+    The overhang is the furthest the footprint reaches past its own sample measured along
+    the centerline there, not the centre-front or centre-rear distance: the two agree only
+    when the sample's heading happens to line up with the centerline, which a straight line
+    drawn between two unaligned samples does not guarantee.
+    """
+
+    extended = list(points)
+    if len(extended) < 2:
+        raise ValueError("延伸中心线至少需要两个不同坐标点")
+    leading = _leading_direction(extended)
+    trailing = _trailing_direction(extended)
+    if leading is None or trailing is None:
+        raise ValueError("中心线的两端必须能确定方向")
+    start_overhang = envelope_overhang(
+        start_pose, dimensions, math.atan2(-leading[1], -leading[0])
+    )
+    end_overhang = envelope_overhang(
+        end_pose, dimensions, math.atan2(trailing[1], trailing[0])
+    )
+    head = extended[0]
+    tail = extended[-1]
+    extended.insert(
+        0,
+        Point2D(head.x - leading[0] * start_overhang, head.y - leading[1] * start_overhang),
+    )
+    extended.append(
+        Point2D(tail.x + trailing[0] * end_overhang, tail.y + trailing[1] * end_overhang)
+    )
+    return extended, start_overhang, end_overhang
+
+
+def generate_lane_between(
+    poses: Sequence[PosePoint],
+    dimensions: VehicleDimensions,
+    *,
+    start_index: int,
+    end_index: int,
+    connection: ConnectionMode,
+    lane_id: str,
+    name: str,
+    width: float,
+    mode: BendMode,
+    maximum_deviation: float,
+    closed: bool = False,
+) -> LaneGenerationResult:
+    """Build one lane spanning two chosen samples, covering both end footprints."""
+
+    count = len(poses)
+    if not (0 <= start_index < count and 0 <= end_index < count):
+        raise ValueError("点位序号超出路径范围")
+    if start_index == end_index:
+        raise ValueError("两个点位不能是同一个样本")
+    first, last = sorted((start_index, end_index))
+    start_pose = poses[first]
+    end_pose = poses[last]
+    for index, pose in ((first, start_pose), (last, end_pose)):
+        if pose.yaw is None:
+            raise ValueError(f"点位 {index + 1} 缺少 yaw，无法算出车体范围")
+
+    if connection is ConnectionMode.STRAIGHT:
+        if _same_point(_as_point(start_pose), _as_point(end_pose)):
+            raise ValueError("两个点位坐标重合，直线连接得不到有效车道")
+        source = [_as_point(start_pose), _as_point(end_pose)]
+        mode = BendMode.SHARP
+        closed = False
+    else:
+        source = [_as_point(pose) for pose in poses[first : last + 1]]
+
+    extended, start_overhang, end_overhang = extend_to_cover(
+        _deduplicate(source), start_pose, end_pose, dimensions
+    )
+    result = generate_lane(
+        extended,
+        lane_id=lane_id,
+        name=name,
+        width=width,
+        mode=mode,
+        maximum_deviation=maximum_deviation,
+        closed=closed,
+    )
+    return LaneGenerationResult(
+        result.lane,
+        replace(
+            result.metrics, start_overhang=start_overhang, end_overhang=end_overhang
+        ),
+    )
 
 
 def generate_lane(

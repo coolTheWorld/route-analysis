@@ -47,7 +47,11 @@ from route_analysis.api_client import (
     SchedulerClient,
     TaskRecord,
 )
-from route_analysis.auto_lane_dialog import log_auto_lane_selection, run_auto_lane_dialog
+from route_analysis.auto_lane_dialog import (
+    LanePickRequest,
+    log_auto_lane_selection,
+    run_auto_lane_dialog,
+)
 from route_analysis.canvas import RouteCanvas
 from route_analysis.clearance_panel import (
     ClearanceInputs,
@@ -65,7 +69,7 @@ from route_analysis.clearance_solver import ClearanceAnalysis, LaneContext, anal
 from route_analysis.control_panel import ControlPanel
 from route_analysis.errors import RouteAnalysisError, StorageError
 from route_analysis.geometry import build_traversable_area
-from route_analysis.lane_generation import BendMode
+from route_analysis.lane_generation import BendMode, ConnectionMode
 from route_analysis.logging_setup import LoggingManager, LoggingState, log_event
 from route_analysis.logging_ui import add_log_menu
 from route_analysis.models import (
@@ -196,6 +200,8 @@ class MainWindow(QMainWindow):
         }
         self._clearance_generation = 0
         self._clearance_stale = True
+        self._lane_pick_path: str | None = None
+        self._lane_pick_first: int | None = None
         self._manual_radius_path: str | None = None
         self._manual_radius_start: int | None = None
         self._radius_generations = {"dispatched": 0, "actual": 0}
@@ -253,6 +259,8 @@ class MainWindow(QMainWindow):
         self.canvas.manual_radius_cancelled.connect(
             lambda _path: self._finish_manual_radius()
         )
+        self.canvas.lane_endpoint_selected.connect(self._lane_endpoint_selected)
+        self.canvas.lane_pick_cancelled.connect(lambda _path: self._finish_lane_pick())
         self.canvas_tabs = QTabWidget()
         self.canvas_tabs.setAccessibleName("地图与通行余量")
         self.canvas_tabs.addTab(self.canvas, "地图")
@@ -393,30 +401,87 @@ class MainWindow(QMainWindow):
         )
 
     def open_auto_lane_dialog(self) -> None:
+        """Start, or stop, picking the two samples the new lane has to span."""
+
+        if self._lane_pick_path is not None:
+            self._finish_lane_pick()
+            return
         if self.config.default_lane_width is None:
             self._show_error("请先在设置中填写新车道默认总宽")
             return
-        if len(self._dispatched_path) < 2 and len(self._actual_path) < 2:
-            self._show_error("当前命令没有可用于生成车道的路径坐标")
+        path_name = self.path_details.current_path_name
+        if len(self._path_for(path_name)) < 2:
+            label = "下发路径" if path_name == "dispatched" else "实际执行路径"
+            self._show_error(f"当前命令的{label}没有可用于生成车道的坐标点")
             return
+        self._lane_pick_path = path_name
+        self._lane_pick_first = None
+        self.canvas.set_lane_pick_mode(path_name)
+        self.control_panel.set_lane_pick_mode(True)
+        self.status_label.setText("请在路径上选择第一个点位；按 Esc 退出")
+
+    def _finish_lane_pick(self) -> None:
+        self._lane_pick_path = None
+        self._lane_pick_first = None
+        self.control_panel.set_lane_pick_mode(False)
+        if self.canvas.sample_pick_kind == "lane":
+            self.canvas.set_sample_pick_mode(None)
+
+    def _lane_endpoint_selected(self, path_name: str, index: int) -> None:
+        if self._lane_pick_path != path_name:
+            return
+        if self._lane_pick_first is None:
+            self._lane_pick_first = index
+            self.canvas.set_sample_pick_endpoints((index,))
+            self.status_label.setText(
+                f"已选第一个点位 {self._sample_label(path_name, index)}；请选择第二个点位"
+            )
+            return
+        if index == self._lane_pick_first:
+            # A misclick on the sample already chosen is routine; a modal box for it is not.
+            self.status_label.setText("两个点位不能是同一个样本；请另选第二个点位")
+            return
+        first = self._lane_pick_first
+        self.canvas.set_sample_pick_endpoints((first, index))
+        self._generate_lane_between(path_name, first, index)
+
+    def _generate_lane_between(self, path_name: str, first: int, second: int) -> None:
+        if self.config.default_lane_width is None:
+            return
+        poses = self._path_for(path_name)
+        try:
+            dimensions = self._dimensions_for(self._displayed_path_vin or "")
+        except ValueError:
+            self._show_error("请先在设置中填写车辆尺寸")
+            return
+        start, end = sorted((first, second))
+        request = LanePickRequest(
+            source=path_name,
+            poses=poses,
+            start_index=start,
+            end_index=end,
+            start_label=self._sample_label(path_name, start),
+            end_label=self._sample_label(path_name, end),
+            dimensions=dimensions,
+        )
         selection = run_auto_lane_dialog(
             self,
-            {
-                "dispatched": self._dispatched_path,
-                "actual": self._actual_path,
-            },
+            request,
             default_width=self.config.default_lane_width,
             maximum_deviation=self.config.analysis.lane_generation_deviation,
             last_mode=BendMode(self.config.lane_generation_mode),
+            last_connection=ConnectionMode(self.config.lane_connection),
             preview_callback=lambda result: self.canvas.set_lane_preview(
                 None if result is None else result.lane
             ),
         )
+        self._lane_pick_first = None
+        self.canvas.set_sample_pick_endpoints(())
         if selection is None:
+            self.status_label.setText("已取消；请重新选择第一个点位")
             return
 
         result = selection.generation
-        selected_source = selection.source
         new_config = replace(
             self.config,
             analysis=replace(
@@ -424,6 +489,7 @@ class MainWindow(QMainWindow):
                 lane_generation_deviation=selection.maximum_deviation,
             ),
             lane_generation_mode=selection.mode,
+            lane_connection=selection.connection,
         )
         try:
             self._config_repository.save(new_config)
@@ -434,12 +500,11 @@ class MainWindow(QMainWindow):
         self.canvas.add_generated_lane(result.lane)
         metrics = result.metrics
         self.status_label.setText(
-            f"已新增车道：{result.lane.name}；最大偏差 {metrics.maximum_deviation:.6f} m"
+            f"已新增车道：{result.lane.name}；两端延伸 "
+            f"{metrics.start_overhang:.2f} m / {metrics.end_overhang:.2f} m；"
+            "请选择第一个点位或点「结束选点」"
         )
-        source_path = (
-            self._dispatched_path if selected_source == "dispatched" else self._actual_path
-        )
-        log_auto_lane_selection(selection, source_path)
+        log_auto_lane_selection(selection, poses)
 
     def _search_orders(self) -> None:
         if self._navigation_level != "orders":
