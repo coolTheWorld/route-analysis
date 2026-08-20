@@ -6,7 +6,7 @@ import math
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
@@ -265,11 +265,23 @@ def render_clearance(app: QApplication, output: Path) -> bool:
     window.show()
     app.processEvents()
     panel.overview.table.selectRow(0)
-    for _ in range(4):
-        QTest.qWait(400)
-        app.processEvents()
+    # The width ruler is solved in a worker thread. Wait on an idle event loop, never on
+    # QTest.qWait: a spinning main thread holds the GIL between switch intervals and
+    # starves the worker so badly that a 40 ms solve does not finish inside ten seconds.
+    loop = QEventLoop()
+    QTimer.singleShot(30_000, loop.quit)
+    QTimer.singleShot(50, lambda: _quit_when_solved(panel, loop))
+    loop.exec()
+    app.processEvents()
     clearance_output = output.with_name(f"{output.stem}-clearance{output.suffix}")
     return bool(window.grab().save(str(clearance_output)))
+
+
+def _quit_when_solved(panel: ClearancePanel, loop: QEventLoop) -> None:
+    if panel.selected_zones() is not None:
+        loop.quit()
+        return
+    QTimer.singleShot(50, lambda: _quit_when_solved(panel, loop))
 
 
 if __name__ == "__main__":
