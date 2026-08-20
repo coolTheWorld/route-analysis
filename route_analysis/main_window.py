@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import math
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -77,7 +76,7 @@ from route_analysis.turn_measurements import (
     path_fingerprint,
     recalculate_measurements,
 )
-from route_analysis.turn_radius import calculate_turn_radius, detect_turns
+from route_analysis.turn_radius import calculate_turn_radius
 from route_analysis.workers import Worker
 
 LOGGER = logging.getLogger(__name__)
@@ -144,8 +143,6 @@ class MainWindow(QMainWindow):
         self._path_pool.setMaxThreadCount(1)
         self._analysis_pool = QThreadPool(self)
         self._analysis_pool.setMaxThreadCount(1)
-        self._radius_pool = QThreadPool(self)
-        self._radius_pool.setMaxThreadCount(1)
         self._workers: set[Worker[object]] = set()
         self._busy = False
         self._analysis_generation = 0
@@ -228,7 +225,6 @@ class MainWindow(QMainWindow):
         self.control_panel.analyze_requested.connect(self.analyze_now)
         self.control_panel.generate_lane_requested.connect(self.open_auto_lane_dialog)
         self.control_panel.direction_changed.connect(self._direction_changed)
-        self.control_panel.auto_radius_requested.connect(self._calculate_automatic_radii)
         self.control_panel.manual_radius_requested.connect(self._toggle_manual_radius)
         self.control_panel.radius_delete_requested.connect(self._delete_radius_measurement)
         self.control_panel.radius_rename_requested.connect(self._rename_radius_measurement)
@@ -1027,76 +1023,16 @@ class MainWindow(QMainWindow):
             dimensions_source=self._dimensions_source(vin),
         )
 
-    def _calculate_automatic_radii(self, path_name: str) -> None:
-        state = self._radius_states.get(path_name)
-        if state is None:
-            return
-        points = self._path_for(path_name)
-        fingerprint = path_fingerprint(points)
-        threshold = self.config.analysis.turn_threshold
-        self._radius_generations[path_name] += 1
-        generation = self._radius_generations[path_name]
-        self.status_label.setText(
-            f"正在计算{('下发' if path_name == 'dispatched' else '实际')}路径自动半径…"
-        )
-
-        def operation() -> tuple[tuple[int, int], ...]:
-            return tuple(
-                (turn.start_index, turn.end_index)
-                for turn in detect_turns(points, threshold=threshold)
-            )
-
-        worker: Worker[object] = Worker(operation)
-        self._workers.add(worker)
-
-        def show(result: object) -> None:
-            if generation != self._radius_generations[path_name]:
-                return
-            if path_fingerprint(self._path_for(path_name)) != fingerprint:
-                return
-            current_state = self._radius_states.get(path_name)
-            if current_state is None:
-                return
-            pairs = cast(tuple[tuple[int, int], ...], result)
-            previous = copy.deepcopy(current_state)
-            current_state.replace_automatic(pairs)
-            if not self._commit_radius_state(path_name, previous):
-                return
-            self._refresh_radius_measurements()
-            self.status_label.setText(
-                f"{('下发' if path_name == 'dispatched' else '实际')}路径自动半径已更新："
-                f"{len(current_state.automatic_records)} 条"
-            )
-
-        worker.signals.succeeded.connect(show)
-
-        def show_failure(message: str) -> None:
-            if generation == self._radius_generations[path_name]:
-                self._show_error(message)
-
-        worker.signals.failed.connect(show_failure)
-        worker.signals.finished.connect(lambda: self._workers.discard(worker))
-        self._radius_pool.start(worker)
-
     def _toggle_manual_radius(self, path_name: str) -> None:
         if self._manual_radius_path == path_name:
             self._finish_manual_radius()
             return
         self._finish_manual_radius()
-        points = self._path_for(path_name)
-        suggestions = {
-            index
-            for turn in detect_turns(
-                points,
-                threshold=self.config.analysis.turn_threshold,
-            )
-            for index in (turn.start_index, turn.end_index)
-        }
         self._manual_radius_path = path_name
         self._manual_radius_start = None
         self.control_panel.layer_checks[path_name][0].setChecked(True)
         self.control_panel.set_manual_radius_mode(path_name, True)
-        self.canvas.set_manual_radius_mode(path_name, suggestions)
+        self.canvas.set_manual_radius_mode(path_name)
         self.status_label.setText("请选择入弯路径点")
 
     def _finish_manual_radius(self) -> None:
@@ -1111,12 +1047,15 @@ class MainWindow(QMainWindow):
             return
         if self._manual_radius_start is None:
             self._manual_radius_start = index
-            self.canvas.set_manual_radius_start(index)
-            self.status_label.setText(f"已选择入弯样本 {index}，请选择其后的出弯样本")
+            self.canvas.set_manual_radius_endpoints((index,))
+            self.status_label.setText(
+                f"已选择入弯样本 {self._sample_label(path_name, index)}，请选择其后的出弯样本"
+            )
             return
         start_index = self._manual_radius_start
         self._manual_radius_start = None
-        self.canvas.set_manual_radius_start(None)
+        # Both endpoints and their neighbourhoods stay marked until the next pick.
+        self.canvas.set_manual_radius_endpoints((start_index, index))
         state = self._radius_states[path_name]
         if state is None:
             return
@@ -1155,6 +1094,13 @@ class MainWindow(QMainWindow):
             ("已创建" if created else "已定位已有") + f"手动测量：{record.name}"
         )
 
+    def _sample_label(self, path_name: str, index: int) -> int:
+        """Return the one-based source number shown for a path sample in the interface."""
+        source_indices = self._path_documents[path_name].pose_source_indices
+        if not 0 <= index < len(source_indices):
+            return index + 1
+        return source_indices[index] + 1
+
     def _delete_radius_measurement(self, path_name: str, measurement_id: str) -> None:
         state = self._radius_states.get(path_name)
         if state is None:
@@ -1165,25 +1111,6 @@ class MainWindow(QMainWindow):
         self._radius_generations[path_name] += 1
         if self._commit_radius_state(path_name, previous):
             self._refresh_radius_measurements()
-
-    def _clear_automatic_radii_for_threshold_change(self) -> None:
-        changed = False
-        for path_name in ("dispatched", "actual"):
-            state = self._radius_states.get(path_name)
-            if state is None:
-                continue
-            self._radius_generations[path_name] += 1
-            had_automatic = bool(state.automatic_records)
-            previous = copy.deepcopy(state)
-            state.clear_automatic()
-            if had_automatic and self._commit_radius_state(path_name, previous):
-                changed = True
-        self._refresh_radius_measurements()
-        self.status_label.setText(
-            "转弯识别阈值已变化，请重新自动计算半径"
-            if changed
-            else "转弯识别阈值已变化；自动建议将使用新阈值"
-        )
 
     def _rename_radius_measurement(
         self,
@@ -1433,7 +1360,6 @@ class MainWindow(QMainWindow):
         )
 
     def open_settings(self) -> None:
-        old_turn_threshold = self.config.analysis.turn_threshold
         old_tenant = self.config.tenant.strip()
         dialog = SettingsDialog(self.config, self._profiles)
         if dialog.exec() != SettingsDialog.DialogCode.Accepted or dialog.result_config is None:
@@ -1480,14 +1406,7 @@ class MainWindow(QMainWindow):
             self._radius_generations["actual"] += 1
             self._refresh_radius_measurements()
         self._apply_config()
-        if not context_changed and not math.isclose(
-            old_turn_threshold,
-            self.config.analysis.turn_threshold,
-            rel_tol=0,
-            abs_tol=1e-12,
-        ):
-            self._clear_automatic_radii_for_threshold_change()
-        elif not context_changed:
+        if not context_changed:
             self._refresh_radius_measurements()
         if self._logging_manager is not None:
             self._logging_manager.set_level(self.config.log_level)

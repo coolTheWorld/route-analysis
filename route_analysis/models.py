@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -115,7 +114,6 @@ class AnalysisSettings:
     clearance_threshold: float = 0.05
     bezier_tolerance: float = 0.02
     miter_limit: float = 4.0
-    turn_threshold: float = math.pi / 6
     lane_generation_deviation: float = 0.05
 
     def __post_init__(self) -> None:
@@ -125,7 +123,6 @@ class AnalysisSettings:
             raise ValueError("clearance_threshold must be finite and non-negative")
         _positive(self.bezier_tolerance, "bezier_tolerance")
         _positive(self.miter_limit, "miter_limit")
-        _positive(self.turn_threshold, "turn_threshold")
         _positive(self.lane_generation_deviation, "lane_generation_deviation")
 
 
