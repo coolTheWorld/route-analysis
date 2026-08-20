@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +49,19 @@ from route_analysis.api_client import (
 )
 from route_analysis.auto_lane_dialog import log_auto_lane_selection, run_auto_lane_dialog
 from route_analysis.canvas import RouteCanvas
+from route_analysis.clearance_panel import (
+    ClearanceInputs,
+    ClearancePanel,
+    build_suggestions,
+    offset_rows,
+)
+from route_analysis.clearance_report import (
+    CornerReport,
+    ReportContext,
+    export_offsets_csv,
+    export_report_pdf,
+)
+from route_analysis.clearance_solver import ClearanceAnalysis, LaneContext, analyse_clearance
 from route_analysis.control_panel import ControlPanel
 from route_analysis.errors import RouteAnalysisError, StorageError
 from route_analysis.geometry import build_traversable_area
@@ -179,6 +194,8 @@ class MainWindow(QMainWindow):
             "dispatched": (),
             "actual": (),
         }
+        self._clearance_generation = 0
+        self._clearance_stale = True
         self._manual_radius_path: str | None = None
         self._manual_radius_start: int | None = None
         self._radius_generations = {"dispatched": 0, "actual": 0}
@@ -236,7 +253,16 @@ class MainWindow(QMainWindow):
         self.canvas.manual_radius_cancelled.connect(
             lambda _path: self._finish_manual_radius()
         )
-        right.addWidget(self.canvas)
+        self.canvas_tabs = QTabWidget()
+        self.canvas_tabs.setAccessibleName("地图与通行余量")
+        self.canvas_tabs.addTab(self.canvas, "地图")
+        self.clearance_panel = ClearancePanel()
+        self.clearance_panel.pose_selected.connect(self._clearance_pose_selected)
+        self.clearance_panel.export_csv_requested.connect(self.export_offset_table)
+        self.clearance_panel.export_pdf_requested.connect(self.export_clearance_report)
+        self.canvas_tabs.addTab(self.clearance_panel, "通行余量")
+        self.canvas_tabs.currentChanged.connect(self._canvas_tab_changed)
+        right.addWidget(self.canvas_tabs)
         right.addWidget(self.control_panel)
         right.setStretchFactor(0, 1)
         root_splitter.addWidget(right)
@@ -1212,11 +1238,174 @@ class MainWindow(QMainWindow):
                 dispatched_clearance=dispatched_result,
                 actual_clearance=actual_result,
             )
+            self._clearance_stale = True
+            self._refresh_clearance()
 
         worker.signals.succeeded.connect(show)
         worker.signals.failed.connect(self._show_error)
         worker.signals.finished.connect(lambda: self._workers.discard(worker))
         self._analysis_pool.start(worker)
+
+    def _canvas_tab_changed(self, index: int) -> None:
+        if index == 1:
+            self._refresh_clearance()
+
+    def _clearance_visible(self) -> bool:
+        return self.canvas_tabs.currentIndex() == 1
+
+    def _refresh_clearance(self) -> None:
+        """Solve the offset headroom, but only while its tab is the one being looked at.
+
+        The band search costs far more than the clearance pass it follows, so paying for
+        it on every lane edit would make editing crawl for a view nobody is watching.
+        """
+
+        if not self._clearance_visible() or not self._clearance_stale:
+            return
+        if self._displayed_path_vin is None or self._lane_key is None:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        vin = self._displayed_path_vin
+        try:
+            dimensions = self._dimensions_for(vin)
+        except ValueError:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        dispatched = self._dispatched_path
+        if len(dispatched) < 2:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        lanes = list(self.canvas.current_layout().lanes)
+        settings = self.config.analysis
+        labels = tuple(
+            self._sample_label("dispatched", index) for index in range(len(dispatched))
+        )
+        self._clearance_stale = False
+        self._clearance_generation += 1
+        generation = self._clearance_generation
+        self.status_label.setText("正在求解通行余量…")
+
+        def operation() -> tuple[ClearanceAnalysis | None, LaneContext]:
+            context = LaneContext(lanes, settings)
+            return (
+                analyse_clearance(
+                    dispatched, dimensions, lanes, settings, sample_labels=labels
+                ),
+                context,
+            )
+
+        worker: Worker[object] = Worker(operation)
+        self._workers.add(worker)
+
+        def show(result: object) -> None:
+            if generation != self._clearance_generation:
+                return
+            analysis, context = cast(
+                tuple[ClearanceAnalysis | None, LaneContext], result
+            )
+            inputs = (
+                ClearanceInputs(
+                    poses=tuple(dispatched),
+                    dimensions=dimensions,
+                    settings=settings,
+                    context=context,
+                    metadata=self._clearance_metadata(vin),
+                )
+                if analysis is not None
+                else None
+            )
+            self.clearance_panel.set_analysis(analysis, inputs)
+            self.status_label.setText(
+                "就绪" if analysis is not None else "当前命令没有可分析的通行余量"
+            )
+
+        worker.signals.succeeded.connect(show)
+        worker.signals.failed.connect(self._show_error)
+        worker.signals.finished.connect(lambda: self._workers.discard(worker))
+        self._analysis_pool.start(worker)
+
+    def _clearance_metadata(self, vin: str) -> dict[str, str]:
+        dimensions = self._dimensions_for(vin)
+        settings = self.config.analysis
+        return {
+            "order": str(self._current_order.id) if self._current_order else "",
+            "task": str(self._current_task.id) if self._current_task else "",
+            "command": str(self._current_command.id) if self._current_command else "",
+            "vin": vin,
+            "vehicle": (
+                f"宽 {dimensions.width:.2f} / 前 {dimensions.center_front:.2f} / "
+                f"后 {dimensions.center_rear:.2f} m"
+            ),
+            "vehicle_source": self._dimensions_source(vin),
+            "lane_layout": self._lane_key[1] if self._lane_key else "",
+            "steps": (
+                f"位置 {settings.position_step:.2f} m · 航向 {settings.yaw_step:.2f} rad"
+            ),
+        }
+
+    def _clearance_pose_selected(self, pose_index: int) -> None:
+        indices = self._path_documents["dispatched"].pose_source_indices
+        if not 0 <= pose_index < len(indices):
+            return
+        self.canvas_tabs.setCurrentIndex(0)
+        source_index = indices[pose_index]
+        self.path_details.select_point("dispatched", source_index, emit_signal=False)
+        self._path_detail_selected("dispatched", source_index)
+
+    def export_offset_table(self) -> None:
+        analysis = self.clearance_panel.analysis
+        if analysis is None:
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出偏置表", "clearance-offsets.csv", "CSV (*.csv)"
+        )
+        if not filename:
+            return
+        try:
+            export_offsets_csv(Path(filename), offset_rows(analysis))
+        except OSError as exc:
+            self._show_error(f"导出偏置表失败：{exc}")
+            return
+        self.status_label.setText(f"偏置表已导出到 {filename}")
+
+    def export_clearance_report(self) -> None:
+        analysis = self.clearance_panel.analysis
+        inputs = self.clearance_panel.inputs
+        if analysis is None or inputs is None:
+            return
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        command = inputs.metadata.get("command") or "command"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出通行余量报告", f"clearance-{command}-{stamp}.pdf", "PDF (*.pdf)"
+        )
+        if not filename:
+            return
+        context = ReportContext(
+            report_id=f"{command}-{stamp}",
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            order=inputs.metadata.get("order", ""),
+            task=inputs.metadata.get("task", ""),
+            command=command,
+            vehicle=inputs.metadata.get("vehicle", ""),
+            vehicle_source=inputs.metadata.get("vehicle_source", ""),
+            lane_layout=inputs.metadata.get("lane_layout", ""),
+            steps=inputs.metadata.get("steps", ""),
+            samples=f"{analysis.analyzed_samples} 个",
+        )
+        corner = self.clearance_panel.corner_report()
+        try:
+            pages = export_report_pdf(
+                Path(filename),
+                analysis,
+                context,
+                build_suggestions(analysis),
+                zones=self.clearance_panel.selected_zones(),
+                corner=corner if isinstance(corner, CornerReport) else None,
+            )
+        except (OSError, ValueError) as exc:
+            self._show_error(f"导出报告失败：{exc}")
+            return
+        self.status_label.setText(f"报告（{pages} 页）已导出到 {filename}")
 
     def save_lanes(self) -> bool:
         if self._lane_key is None:

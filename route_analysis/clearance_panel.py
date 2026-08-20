@@ -544,6 +544,13 @@ class ClearanceOverview(QWidget):
         for key, (value, unit, state) in card_readings(analysis).items():
             self._cards[key].show_value(value, unit, state)
 
+    def selected_zones(self) -> WidthZones | None:
+        """Width ruler for the row the user has open, so the report shows what they see."""
+
+        if self._selected is None:
+            return None
+        return self._zones.get(self._selected)
+
     def _row_tint(self, bottleneck: Bottleneck) -> QColor | None:
         if bottleneck.clearance < 0:
             return QColor(theme.DANGER_TINT)
@@ -758,6 +765,14 @@ class ClearancePanel(QWidget):
     @property
     def showing_corner(self) -> bool:
         return self._stack.currentIndex() == 1
+
+    def selected_zones(self) -> WidthZones | None:
+        return self.overview.selected_zones()
+
+    def corner_report(self) -> object | None:
+        """The corner page for the report, present only while the corner view is open."""
+
+        return self.corner_view.report() if self.showing_corner else None
 
     def set_analysis(
         self, analysis: ClearanceAnalysis | None, inputs: ClearanceInputs | None
