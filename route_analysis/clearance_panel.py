@@ -81,7 +81,7 @@ class ClearanceInputs:
     metadata: dict[str, str]
 
 
-class _MetricCard(QFrame):
+class MetricCard(QFrame):
     """One of the five summary readings across the top of the view."""
 
     def __init__(self, caption: str) -> None:
@@ -209,7 +209,7 @@ class _RulerView(QWidget):
         painter.end()
 
 
-class _SuggestionCard(QFrame):
+class SuggestionCard(QFrame):
     def __init__(self, rank: str, title: str, body: str, *, pill: bool) -> None:
         super().__init__()
         self.setObjectName("suggestionCard")
@@ -330,6 +330,66 @@ def build_suggestions(analysis: ClearanceAnalysis) -> list[tuple[str, str, str]]
     return cards
 
 
+CARD_CAPTIONS: tuple[tuple[str, str], ...] = (
+    ("status", "状态"),
+    ("breach", "最深越界"),
+    ("outside", "落在可行带外"),
+    ("narrow", "可行带最窄"),
+    ("suggested", "按建议偏置后"),
+)
+
+
+def card_readings(analysis: ClearanceAnalysis) -> dict[str, tuple[str, str, str]]:
+    """The five summary readings, so the view and the report never disagree on them."""
+
+    words = {
+        ClearanceStatus.SAFE: ("通过", "success"),
+        ClearanceStatus.WARNING: ("临界", "warning"),
+        ClearanceStatus.OUTSIDE: ("越界", "danger"),
+        ClearanceStatus.UNAVAILABLE: ("无结果", "neutral"),
+    }
+    status_text, status_state = words[analysis.status]
+    narrow = analysis.narrowest_band
+    return {
+        "status": (status_text, f"{analysis.pose_count} 点位", status_state),
+        "breach": (
+            "无" if analysis.deepest_breach is None else format_length(analysis.deepest_breach),
+            "" if analysis.deepest_breach is None else "m",
+            "success" if analysis.deepest_breach is None else "danger",
+        ),
+        "outside": (
+            str(analysis.outside_band_segments),
+            "段",
+            "danger" if analysis.outside_band_segments else "success",
+        ),
+        "narrow": (
+            "无可行带" if narrow is None else format_length(narrow.width),
+            "" if narrow is None else f"m @ {analysis.segments[narrow.segment_index].short_label}",
+            "danger" if narrow is None else ("warning" if narrow.width < 0.2 else "success"),
+        ),
+        "suggested": (
+            "—"
+            if analysis.suggested_clearance is None
+            else format_length(analysis.suggested_clearance, signed=True),
+            "" if analysis.suggested_clearance is None else "m",
+            _state_for(analysis.suggested_clearance, analysis.threshold),
+        ),
+    }
+
+
+def build_metric_cards(analysis: ClearanceAnalysis) -> list[MetricCard]:
+    """Detached copies of the five summary cards, for rendering onto a report page."""
+
+    readings = card_readings(analysis)
+    cards = []
+    for key, caption in CARD_CAPTIONS:
+        card = MetricCard(caption)
+        value, unit, state = readings[key]
+        card.show_value(value, unit, state)
+        cards.append(card)
+    return cards
+
+
 class ClearanceOverview(QWidget):
     """Assembles the summary cards, the shared-axis chart, the ranking and the advice."""
 
@@ -358,16 +418,7 @@ class ClearanceOverview(QWidget):
 
         cards = QGridLayout()
         cards.setSpacing(10)
-        self._cards = {
-            key: _MetricCard(caption)
-            for key, caption in (
-                ("status", "状态"),
-                ("breach", "最深越界"),
-                ("outside", "落在可行带外"),
-                ("narrow", "可行带最窄"),
-                ("suggested", "按建议偏置后"),
-            )
-        }
+        self._cards = {key: MetricCard(caption) for key, caption in CARD_CAPTIONS}
         for column, card in enumerate(self._cards.values()):
             cards.addWidget(card, 0, column)
             cards.setColumnStretch(column, 1)
@@ -490,42 +541,8 @@ class ClearanceOverview(QWidget):
             for card in self._cards.values():
                 card.show_value("—")
             return
-        labels = {
-            ClearanceStatus.SAFE: ("通过", "success"),
-            ClearanceStatus.WARNING: ("临界", "warning"),
-            ClearanceStatus.OUTSIDE: ("越界", "danger"),
-            ClearanceStatus.UNAVAILABLE: ("无结果", "neutral"),
-        }
-        text, state = labels[analysis.status]
-        self._cards["status"].show_value(text, f"{analysis.pose_count} 点位", state)
-        if analysis.deepest_breach is None:
-            self._cards["breach"].show_value("无", "", "success")
-        else:
-            self._cards["breach"].show_value(
-                format_length(analysis.deepest_breach), "m", "danger"
-            )
-        self._cards["outside"].show_value(
-            str(analysis.outside_band_segments),
-            "段",
-            "danger" if analysis.outside_band_segments else "success",
-        )
-        if analysis.narrowest_band is None:
-            self._cards["narrow"].show_value("无可行带", "", "danger")
-        else:
-            segment = analysis.segments[analysis.narrowest_band.segment_index]
-            self._cards["narrow"].show_value(
-                format_length(analysis.narrowest_band.width),
-                f"m @ {segment.short_label}",
-                "warning" if analysis.narrowest_band.width < 0.2 else "success",
-            )
-        if analysis.suggested_clearance is None:
-            self._cards["suggested"].show_value("—")
-        else:
-            self._cards["suggested"].show_value(
-                format_length(analysis.suggested_clearance, signed=True),
-                "m",
-                _state_for(analysis.suggested_clearance, analysis.threshold),
-            )
+        for key, (value, unit, state) in card_readings(analysis).items():
+            self._cards[key].show_value(value, unit, state)
 
     def _row_tint(self, bottleneck: Bottleneck) -> QColor | None:
         if bottleneck.clearance < 0:
@@ -587,7 +604,7 @@ class ClearanceOverview(QWidget):
             return
         for rank, title, body in build_suggestions(self._analysis):
             self._advice_holder.addWidget(
-                _SuggestionCard(rank, title, body, pill=rank != "discouraged")
+                SuggestionCard(rank, title, body, pill=rank != "discouraged")
             )
 
     def _refresh_status(self) -> None:
