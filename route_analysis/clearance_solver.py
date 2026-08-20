@@ -14,7 +14,7 @@ from shapely.ops import unary_union
 
 from route_analysis.analysis import analyze_path
 from route_analysis.clearance_geometry import FittedCorner, build_corner_poses, fit_corner
-from route_analysis.geometry import build_lane_area
+from route_analysis.geometry import build_lane_area, vehicle_polygon
 from route_analysis.models import (
     AnalysisSettings,
     ClearanceStatus,
@@ -30,6 +30,8 @@ SEARCH_RADIUS = 1.5
 COARSE_STEPS = 16
 BISECTION_STEPS = 10
 UNBOUNDED = float("inf")
+CONFLICT_TOLERANCE = 0.005
+"""Bands closer than this are treated as agreeing; a hair of float noise is not a conflict."""
 
 
 class SegmentRole(StrEnum):
@@ -165,6 +167,53 @@ class WidthZones:
     scale_high: float
 
 
+CORNER_NAMES = {
+    (True, True): "前内角",
+    (True, False): "前外角",
+    (False, True): "后内角",
+    (False, False): "后外角",
+}
+
+
+def constraining_feature(
+    pose: PosePoint,
+    dimensions: VehicleDimensions,
+    area: BaseGeometry,
+    side: TurnSide | None,
+) -> str:
+    """Name whichever part of the footprint sits closest to the traversable boundary.
+
+    The design's whole point is that the constraint is usually the reversing side's rear
+    outer corner rather than the vehicle's width, so the ranking has to say which it is.
+    """
+
+    if pose.yaw is None:
+        return "—"
+    polygon = vehicle_polygon(pose, dimensions)
+    corners = list(polygon.exterior.coords)[:4]
+    if area.covers(polygon):
+        distances = [Point(x, y).distance(area.boundary) for x, y in corners]
+        ordered = sorted(range(4), key=lambda position: distances[position])
+        if distances[ordered[0]] - polygon.boundary.distance(area.boundary) > 0.02:
+            return "车身侧边"
+        if distances[ordered[1]] - distances[ordered[0]] < 0.01:
+            return "车身侧边"
+    else:
+        penetration = [Point(x, y).distance(area) for x, y in corners]
+        ordered = sorted(range(4), key=lambda position: -penetration[position])
+        if penetration[ordered[0]] <= 1e-9:
+            return "车身侧边"
+        if penetration[ordered[0]] - penetration[ordered[1]] < 0.005:
+            return "车身侧边"
+    index = ordered[0]
+    front = index in (0, 1)
+    left = index in (0, 3)
+    if side is None:
+        return f"{'前' if front else '后'}{'左' if left else '右'}角"
+    inner = left if side is TurnSide.LEFT else not left
+    return CORNER_NAMES[(front, inner)]
+
+
 @dataclass(frozen=True, slots=True)
 class Bottleneck:
     """One segment ranked by how little room it leaves."""
@@ -178,6 +227,7 @@ class Bottleneck:
     required_offset: float | None
     inside_band: bool
     band_feasible: bool
+    feature: str
 
     @property
     def offset_text(self) -> str:
@@ -521,7 +571,9 @@ def couple_bands(
                 low = max(low, adjoining.low)
                 high = min(high, adjoining.high)
                 sources.append(neighbour)
-        conflicting = high < low
+        conflicting = low - high > CONFLICT_TOLERANCE
+        if not conflicting and high < low:
+            low = high = (low + high) / 2
         coupled.append(
             CoupledBand(segment.index, low, high, tuple(sources), not conflicting, conflicting)
         )
@@ -676,6 +728,7 @@ def analyse_clearance(
                 required_offset=required,
                 inside_band=inside,
                 band_feasible=band.feasible if band else False,
+                feature=constraining_feature(pose, dimensions, area, segments[segment_index].side),
             )
         )
 
