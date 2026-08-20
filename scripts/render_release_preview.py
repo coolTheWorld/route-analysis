@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QFont, QFontDatabase, QMouseEvent
+from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 
@@ -19,34 +19,17 @@ from route_analysis.models import Point2D, PosePoint, VehicleDimensions
 from route_analysis.parsing import parse_command_details
 from route_analysis.path_details_panel import PathDetailsPanel
 from route_analysis.storage import LaneLayout
-from route_analysis.theme import APPLICATION_STYLESHEET
+from route_analysis.theme import APPLICATION_STYLESHEET, select_cjk_font
 from route_analysis.turn_measurements import (
     RadiusMeasurementState,
     recalculate_measurements,
 )
 
 
-WINDOWS_FONT_FILE = "C:/Windows/Fonts/msyh.ttc"
-PREVIEW_FONT_FAMILIES = (
-    "Microsoft YaHei",
-    "Noto Sans CJK SC",
-    "Source Han Sans SC",
-    "WenQuanYi Zen Hei",
-)
-
-
 def select_preview_font() -> QFont:
     """Return an installed CJK family so the preview never renders tofu blocks."""
 
-    if sys.platform == "win32":
-        QFontDatabase.addApplicationFont(WINDOWS_FONT_FILE)
-    families = set(QFontDatabase.families())
-    for family in PREVIEW_FONT_FAMILIES:
-        if family in families:
-            return QFont(family, 9)
-    fallback = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
-    fallback.setPointSize(9)
-    return fallback
+    return select_cjk_font(9)
 
 
 def main() -> int:

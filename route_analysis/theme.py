@@ -1,5 +1,35 @@
 """Application-wide visual tokens and accessible Qt stylesheet."""
 
+from __future__ import annotations
+
+import sys
+
+from PySide6.QtGui import QFont, QFontDatabase
+
+WINDOWS_FONT_FILE = "C:/Windows/Fonts/msyh.ttc"
+CJK_FONT_FAMILIES = (
+    "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "WenQuanYi Zen Hei",
+    "WenQuanYi Micro Hei",
+)
+
+
+def select_cjk_font(point_size: int = 9) -> QFont:
+    """Return an installed CJK family so rendered output never shows tofu blocks."""
+
+    if sys.platform == "win32":
+        QFontDatabase.addApplicationFont(WINDOWS_FONT_FILE)
+    families = set(QFontDatabase.families())
+    for family in CJK_FONT_FAMILIES:
+        if family in families:
+            return QFont(family, point_size)
+    fallback = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    fallback.setPointSize(point_size)
+    return fallback
+
+
 APPLICATION_STYLESHEET = """
 QMainWindow, QDialog, QWidget {
     background: #f4f7fb;
