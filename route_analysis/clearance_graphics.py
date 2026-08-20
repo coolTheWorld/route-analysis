@@ -598,9 +598,9 @@ def paint_offset_curve(painter: QPainter, rect: QRectF, profile: OffsetProfile) 
         color=theme.TEXT_MUTED,
     )
     for label, position in (
-        ("入弯切点", plot.left()),
+        ("入弯切点", plot.left() + 12),
         ("弯心", apex_x),
-        ("出弯切点", plot.right()),
+        ("出弯切点", plot.right() - 12),
     ):
         _text(
             painter,

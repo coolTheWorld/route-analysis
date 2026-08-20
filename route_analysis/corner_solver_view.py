@@ -28,6 +28,7 @@ from route_analysis.clearance_geometry import (
     FittedCorner,
     OffsetProfile,
     build_corner_poses,
+    lane_centreline_through,
     offset_profile,
 )
 from route_analysis.clearance_graphics import (
@@ -451,8 +452,7 @@ class CornerSolverView(QWidget):
     def _radius_changed(self, _value: float) -> None:
         if self._updating:
             return
-        self._refresh_radius_notice()
-        self._refresh_curve()
+        self._recalculate()
 
     def _refresh_radius_notice(self) -> None:
         corner = self._corner
@@ -542,15 +542,8 @@ class CornerSolverView(QWidget):
     ) -> CornerPlan:
         corner = self._corner
         assert corner is not None
-        lane_line = [
-            (corner.entry_point.x, corner.entry_point.y),
-            *(
-                []
-                if corner.corner_point is None
-                else [(corner.corner_point.x, corner.corner_point.y)]
-            ),
-            (corner.exit_point.x, corner.exit_point.y),
-        ]
+        fillet = self.lane_radius_spin.value()
+        lane_line = lane_centreline_through(corner, fillet if fillet > 0 else None)
         rings: list[list[tuple[float, float]]] = []
         geometries = getattr(area, "geoms", None)
         for piece in geometries if geometries is not None else [area]:
