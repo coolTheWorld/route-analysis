@@ -13,9 +13,17 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 
 from route_analysis import __version__
 from route_analysis.canvas import RouteCanvas
+from route_analysis.clearance_panel import ClearanceInputs, ClearancePanel
+from route_analysis.clearance_solver import LaneContext, analyse_clearance
 from route_analysis.control_panel import ControlPanel
 from route_analysis.lane_generation import BendMode, generate_lane
-from route_analysis.models import Point2D, PosePoint, VehicleDimensions
+from route_analysis.models import (
+    AnalysisSettings,
+    Lane,
+    Point2D,
+    PosePoint,
+    VehicleDimensions,
+)
 from route_analysis.parsing import parse_command_details
 from route_analysis.path_details_panel import PathDetailsPanel
 from route_analysis.storage import LaneLayout
@@ -63,7 +71,7 @@ def main() -> int:
     )
     dimensions = VehicleDimensions(2, 3, 1)
     radius_state = RadiusMeasurementState("release-preview")
-    radius_state.replace_automatic(((0, len(path) - 1),))
+    radius_state.add_manual(0, len(path) - 1)
     measurements = recalculate_measurements(radius_state, path, dimensions)
 
     canvas = RouteCanvas()
@@ -190,7 +198,78 @@ def main() -> int:
     app.processEvents()
     draft_output = output.with_name(f"{output.stem}-lane-draft{output.suffix}")
     draft_saved = draft_window.grab().save(str(draft_output))
-    return 0 if overview_saved and radius_saved and points_saved and draft_saved else 1
+
+    clearance_saved = render_clearance(app, output)
+    return (
+        0
+        if overview_saved and radius_saved and points_saved and draft_saved and clearance_saved
+        else 1
+    )
+
+
+def clearance_scene() -> tuple[tuple[PosePoint, ...], list[Lane], VehicleDimensions]:
+    """A main run, a left turn into a narrow branch and a right turn back out."""
+
+    poses = [PosePoint(-12 + index * 0.5, 0.0, 0.0) for index in range(25)]
+    for step in range(1, 25):
+        angle = -math.pi / 2 + math.pi / 2 * step / 24
+        poses.append(
+            PosePoint(
+                1.2 * math.cos(angle), 1.2 + 1.2 * math.sin(angle), angle + math.pi / 2
+            )
+        )
+    poses.extend(PosePoint(1.2, 1.2 + index * 0.5, math.pi / 2) for index in range(1, 17))
+    for step in range(1, 25):
+        angle = math.pi - math.pi / 2 * step / 24
+        poses.append(
+            PosePoint(
+                2.4 + 1.2 * math.cos(angle), 9.2 + 1.2 * math.sin(angle), angle - math.pi / 2
+            )
+        )
+    poses.extend(PosePoint(2.4 + index * 0.5, 10.4, 0.0) for index in range(1, 21))
+    lanes = [
+        Lane.create(
+            "main", "主通道", 3.4, [Point2D(-16, 0), Point2D(1.2, 0), Point2D(1.2, 1.2)]
+        ),
+        Lane.create(
+            "branch", "支通道", 2.2,
+            [Point2D(1.2, 0.6), Point2D(1.2, 10.4), Point2D(26, 10.4)],
+        ),
+    ]
+    return tuple(poses), lanes, VehicleDimensions(1.20, 1.00, 1.60)
+
+
+def render_clearance(app: QApplication, output: Path) -> bool:
+    """Grab the clearance headroom view, so a whole page of UI is not left unwatched."""
+
+    poses, lanes, dimensions = clearance_scene()
+    settings = AnalysisSettings()
+    analysis = analyse_clearance(poses, dimensions, lanes, settings)
+    if analysis is None:
+        return False
+    panel = ClearancePanel()
+    panel.set_analysis(
+        analysis,
+        ClearanceInputs(
+            poses=poses,
+            dimensions=dimensions,
+            settings=settings,
+            context=LaneContext(lanes, settings),
+            metadata={},
+        ),
+    )
+    window = QMainWindow()
+    window.setWindowTitle(f"Suntae 路径通行分析 {__version__} — 通行余量视觉检查")
+    window.setCentralWidget(panel)
+    window.resize(1240, 860)
+    window.show()
+    app.processEvents()
+    panel.overview.table.selectRow(0)
+    for _ in range(4):
+        QTest.qWait(400)
+        app.processEvents()
+    clearance_output = output.with_name(f"{output.stem}-clearance{output.suffix}")
+    return bool(window.grab().save(str(clearance_output)))
 
 
 if __name__ == "__main__":

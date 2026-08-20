@@ -36,6 +36,7 @@ from route_analysis.clearance_graphics import (
     paint_corner_plan,
     paint_offset_curve,
 )
+from route_analysis.clearance_report import CornerReport
 from route_analysis.clearance_solver import (
     ClearanceAnalysis,
     DegreeRange,
@@ -180,6 +181,9 @@ class _PlanView(QWidget):
         self._plan = plan
         self.update()
 
+    def plan(self) -> CornerPlan | None:
+        return self._plan
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(theme.CANVAS_BASE))
@@ -229,6 +233,8 @@ class CornerSolverView(QWidget):
         self._lane: Lane | None = None
         self._updating = False
         self._optimum: dict[str, float] = {}
+        self._current_radius: float | None = None
+        self._current_clearance: float | None = None
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
         self._workers: set[Worker[object]] = set()
@@ -570,6 +576,8 @@ class CornerSolverView(QWidget):
         )
 
     def _fill_contribution(self, radius: float | None, clearance: float | None) -> None:
+        self._current_radius = radius
+        self._current_clearance = clearance
         entry, exit_offset, shift = self._values()
         current = (entry, exit_offset, shift)
         for row, (key, name) in enumerate(
@@ -614,6 +622,27 @@ class CornerSolverView(QWidget):
         worker.signals.finished.connect(self._solving_finished)
         self._workers.add(worker)
         self._pool.start(worker)
+
+    def report(self) -> CornerReport | None:
+        """Snapshot of what this view currently shows, for the report's corner page."""
+
+        corner = self._corner
+        segment = self._segment
+        if corner is None or segment is None:
+            return None
+        entry, exit_offset, shift = self._values()
+        lane_radius = self.lane_radius_spin.value()
+        return CornerReport(
+            segment=segment,
+            corner=corner,
+            lane_radius=lane_radius if lane_radius > 0 else None,
+            plan=self.plan.plan(),
+            entry_offset=entry,
+            exit_offset=exit_offset,
+            arc_start_shift=shift,
+            radius=self._current_radius,
+            clearance=self._current_clearance,
+        )
 
     def _solving_failed(self, message: str) -> None:
         self.worth_label.setText(message)

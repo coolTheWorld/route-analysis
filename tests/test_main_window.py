@@ -502,3 +502,73 @@ def test_lane_drawing_guidance_is_shown_in_status_bar(qtbot: QtBot, tmp_path: Pa
 
     assert result is None
     assert "至少需要两个锚点" in window.status_label.text()
+
+
+def _loaded_window(qtbot: QtBot, tmp_path: Path) -> MainWindow:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    window.show()
+    window.refresh_current_level()
+    qtbot.waitUntil(lambda: window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "commands" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
+    return window
+
+
+def test_canvas_area_offers_the_map_and_the_clearance_tab(qtbot: QtBot, tmp_path: Path) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    assert window.canvas_tabs.count() == 2
+    assert window.canvas_tabs.tabText(0) == "地图"
+    assert window.canvas_tabs.tabText(1) == "通行余量"
+    assert window.canvas_tabs.widget(0) is window.canvas
+    assert window.canvas_tabs.currentIndex() == 0
+
+
+def test_clearance_is_not_solved_while_its_tab_is_hidden(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.analyze_now()
+    qtbot.wait(200)
+    assert window.canvas_tabs.currentIndex() == 0
+    assert window._clearance_stale
+    assert window.clearance_panel.analysis is None
+
+
+def test_opening_the_clearance_tab_without_lanes_leaves_the_panel_empty(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    qtbot.wait(300)
+    assert window.clearance_panel.analysis is None
+    assert not window.clearance_panel.overview.csv_button.isEnabled()
+
+
+def test_selecting_a_clearance_pose_returns_to_the_map(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_pose_selected(0)
+    assert window.canvas_tabs.currentIndex() == 0
+    assert window.path_details.selected_source_index("dispatched") == 0
+
+
+def test_clearance_exports_do_nothing_without_an_analysis(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.export_offset_table()
+    window.export_clearance_report()
+    assert window.clearance_panel.analysis is None
