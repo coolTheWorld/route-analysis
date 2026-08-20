@@ -280,30 +280,96 @@ def test_returning_to_tasks_keeps_displayed_paths_analyzable(qtbot: QtBot, tmp_p
         window.canvas.mark_saved()
 
 
-def test_confirming_auto_lane_adds_once_and_persists_last_generation_mode(
+def _lane_pick_window(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+) -> MainWindow:
     make_config(tmp_path)
     window = MainWindow(tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False)
     qtbot.addWidget(window)
-    window._dispatched_path = (
-        PosePoint(0, 0, None),
-        PosePoint(1, 0.01, None),
-        PosePoint(2, 0, None),
+    window._dispatched_path = tuple(
+        PosePoint(index * 1.0, 0.0, 0.0) for index in range(6)
     )
     monkeypatch.setattr(
         AutoLaneDialog,
         "exec",
         lambda _dialog: AutoLaneDialog.DialogCode.Accepted,
     )
+    return window
+
+
+def test_generating_a_lane_takes_two_picked_samples(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
 
     window.open_auto_lane_dialog()
+    assert window.canvas.sample_pick_kind == "lane"
+    assert window.control_panel.generate_button.text() == "结束选点"
 
+    window._lane_endpoint_selected("dispatched", 1)
+    assert window.canvas.current_layout().lanes == []
+
+    window._lane_endpoint_selected("dispatched", 4)
     assert len(window.canvas.current_layout().lanes) == 1
     assert window.canvas.undo_stack.count() == 1
-    assert ConfigRepository(tmp_path).load().lane_generation_mode == "sharp"
+    saved = ConfigRepository(tmp_path).load()
+    assert saved.lane_generation_mode == "sharp"
+    assert saved.lane_connection == "path"
     window.canvas.undo_stack.undo()
     assert window.canvas.current_layout().lanes == []
+
+
+def test_the_generated_lane_reaches_past_both_chosen_samples(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._lane_endpoint_selected("dispatched", 1)
+    window._lane_endpoint_selected("dispatched", 4)
+
+    try:
+        lane = window.canvas.current_layout().lanes[0]
+        xs = [anchor.point.x for anchor in lane.anchors]
+        # Vehicle is 1 m front and 1 m rear here, so the lane must run 0.0 .. 5.0.
+        assert min(xs) == pytest.approx(0.0)
+        assert max(xs) == pytest.approx(5.0)
+    finally:
+        window.canvas.mark_saved()
+
+
+def test_picking_the_same_sample_twice_keeps_the_mode_open(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._lane_endpoint_selected("dispatched", 2)
+    window._lane_endpoint_selected("dispatched", 2)
+
+    assert window.canvas.current_layout().lanes == []
+    assert window.canvas.sample_pick_kind == "lane"
+    assert "同一个样本" in window.status_label.text()
+
+
+def test_the_button_toggles_the_pick_mode_off_again(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window.open_auto_lane_dialog()
+    assert window.canvas.sample_pick_kind is None
+    assert window.control_panel.generate_button.text() == "按路径生成"
+
+
+def test_starting_a_radius_measurement_cancels_lane_picking(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._toggle_manual_radius("dispatched")
+
+    assert window.canvas.sample_pick_kind == "radius"
+    assert window.control_panel.generate_button.text() == "按路径生成"
+    assert window._lane_pick_path is None
 
 
 def test_logging_failure_status_is_persistent_and_recovers(

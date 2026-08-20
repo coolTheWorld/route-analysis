@@ -206,6 +206,17 @@ class Lane:
         )
 
 
+class VehicleSection(StrEnum):
+    """Which part of the vehicle envelope the canvas draws.
+
+    Display only. Clearance and outside-area analysis always use the whole envelope.
+    """
+
+    FULL = "full"
+    FRONT = "front"
+    REAR = "rear"
+
+
 class ClearanceStatus(StrEnum):
     SAFE = "safe"
     WARNING = "warning"
