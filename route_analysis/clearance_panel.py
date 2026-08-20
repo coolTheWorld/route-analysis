@@ -394,6 +394,7 @@ class ClearanceOverview(QWidget):
     """Assembles the summary cards, the shared-axis chart, the ranking and the advice."""
 
     pose_selected = Signal(int)
+    map_requested = Signal(int)
     corner_requested = Signal(int)
     export_csv_requested = Signal()
     export_pdf_requested = Signal()
@@ -423,6 +424,15 @@ class ClearanceOverview(QWidget):
             cards.addWidget(card, 0, column)
             cards.setColumnStretch(column, 1)
         layout.addLayout(cards)
+
+        caption = QHBoxLayout()
+        chart_title = QLabel("净距剖面 + 可行偏置带")
+        chart_title.setObjectName("clearanceSectionTitle")
+        chart_hint = QLabel("共用横轴 · 上下对齐读同一位置 · 点击图上任意处跳到地图定位")
+        chart_hint.setObjectName("clearanceSectionHint")
+        caption.addWidget(chart_title)
+        caption.addWidget(chart_hint, 1)
+        layout.addLayout(caption)
 
         self.chart = ClearanceChartView()
         self.chart.progress_clicked.connect(self._chart_clicked)
@@ -650,7 +660,9 @@ class ClearanceOverview(QWidget):
         index = min(
             len(inputs.poses) - 1, max(0, round(progress * (len(inputs.poses) - 1)))
         )
-        self.pose_selected.emit(index)
+        # The chart click has no payload of its own; locating on the map is the whole
+        # point of it, so this is the one gesture that changes tabs.
+        self.map_requested.emit(index)
 
     def _highlight_segment(self, segment_index: int) -> None:
         self.chart.set_highlight(segment_index)
@@ -667,6 +679,8 @@ class ClearanceOverview(QWidget):
         self.chart.set_highlight(self._selected)
         self._request_zones(bottleneck)
         self._refresh_table()
+        # Only position the map; do not switch to it. This row's own payload is the width
+        # ruler that just opened underneath it, and leaving the page would destroy it.
         self.pose_selected.emit(bottleneck.pose_index)
 
     def _row_activated(self, item: QTableWidgetItem) -> None:
@@ -732,6 +746,7 @@ class ClearancePanel(QWidget):
     """通行余量 tab: the overview, plus the corner solver it drills down into."""
 
     pose_selected = Signal(int)
+    map_requested = Signal(int)
     export_csv_requested = Signal()
     export_pdf_requested = Signal()
 
@@ -747,6 +762,7 @@ class ClearancePanel(QWidget):
         self._stack.addWidget(self.corner_view)
         layout.addWidget(self._stack)
         self.overview.pose_selected.connect(self.pose_selected)
+        self.overview.map_requested.connect(self.map_requested)
         self.overview.export_csv_requested.connect(self.export_csv_requested)
         self.overview.export_pdf_requested.connect(self.export_pdf_requested)
         self.overview.corner_requested.connect(self._open_corner)

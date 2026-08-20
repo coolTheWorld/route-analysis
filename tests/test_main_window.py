@@ -557,12 +557,30 @@ def test_opening_the_clearance_tab_without_lanes_leaves_the_panel_empty(
     assert not window.clearance_panel.overview.csv_button.isEnabled()
 
 
-def test_selecting_a_clearance_pose_returns_to_the_map(qtbot: QtBot, tmp_path: Path) -> None:
+def test_selecting_a_bottleneck_positions_the_map_without_leaving_the_page(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
     window = _loaded_window(qtbot, tmp_path)
     window.canvas_tabs.setCurrentIndex(1)
     window._clearance_pose_selected(0)
+    assert window.canvas_tabs.currentIndex() == 1
+    assert window.path_details.selected_source_index("dispatched") == 0
+    assert "地图" in window.status_label.text()
+
+
+def test_clicking_the_profile_jumps_to_the_map(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_map_requested(0)
     assert window.canvas_tabs.currentIndex() == 0
     assert window.path_details.selected_source_index("dispatched") == 0
+
+
+def test_locating_an_out_of_range_pose_changes_nothing(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_map_requested(999)
+    assert window.canvas_tabs.currentIndex() == 1
 
 
 def test_clearance_exports_do_nothing_without_an_analysis(
