@@ -114,20 +114,74 @@ def test_selecting_a_row_reports_the_pose_and_opens_the_ruler(
     assert panel.overview.table.rowCount() == len(analysis.bottlenecks) + 1
 
 
-def test_double_clicking_a_turn_opens_the_corner_solver(
+def _row_of_role(panel: ClearancePanel, analysis: ClearanceAnalysis, role: SegmentRole) -> int:
+    for row in range(panel.overview.table.rowCount()):
+        index = panel.overview._segment_at(row)
+        if index is not None and analysis.segments[index].role is role:
+            return row
+    raise AssertionError(f"no {role} row")
+
+
+def test_the_corner_button_is_the_way_into_the_solver(
     qtbot: QtBot, prepared: tuple[ClearanceAnalysis, ClearanceInputs]
 ) -> None:
     analysis, inputs = prepared
     panel = ClearancePanel()
     qtbot.addWidget(panel)
     panel.set_analysis(analysis, inputs)
-    turn = next(
-        item for item in analysis.bottlenecks if item.segment.role is SegmentRole.TURN
-    )
-    panel._open_corner(turn.segment.index)
+    assert not panel.overview.corner_button.isEnabled()
+    panel.overview.table.selectRow(_row_of_role(panel, analysis, SegmentRole.TURN))
+    assert panel.overview.corner_button.isEnabled()
+    panel.overview.corner_button.click()
     assert panel.showing_corner
     panel.corner_view.back_requested.emit()
     assert not panel.showing_corner
+
+
+def test_the_corner_button_stays_off_for_a_straight_run(
+    qtbot: QtBot, prepared: tuple[ClearanceAnalysis, ClearanceInputs]
+) -> None:
+    analysis, inputs = prepared
+    panel = ClearancePanel()
+    qtbot.addWidget(panel)
+    panel.set_analysis(analysis, inputs)
+    panel.overview.table.selectRow(_row_of_role(panel, analysis, SegmentRole.STRAIGHT))
+    assert not panel.overview.corner_button.isEnabled()
+    panel.overview.corner_button.click()
+    assert not panel.showing_corner
+
+
+def test_selecting_a_row_inserts_the_ruler_without_rebuilding_the_others(
+    qtbot: QtBot, prepared: tuple[ClearanceAnalysis, ClearanceInputs]
+) -> None:
+    analysis, inputs = prepared
+    panel = ClearancePanel()
+    qtbot.addWidget(panel)
+    panel.set_analysis(analysis, inputs)
+    table = panel.overview.table
+    before = [table.item(row, 2) for row in range(table.rowCount())]
+    row = _row_of_role(panel, analysis, SegmentRole.TURN)
+    table.selectRow(row)
+    assert panel.overview._ruler_row == row + 1
+    assert table.rowCount() == len(analysis.bottlenecks) + 1
+    # The other rows keep their original items; clearing them would break click gestures.
+    assert table.item(row, 2) is before[row]
+    assert table.cellWidget(row + 1, 0) is not None
+
+
+def test_moving_the_selection_moves_the_ruler(
+    qtbot: QtBot, prepared: tuple[ClearanceAnalysis, ClearanceInputs]
+) -> None:
+    analysis, inputs = prepared
+    panel = ClearancePanel()
+    qtbot.addWidget(panel)
+    panel.set_analysis(analysis, inputs)
+    table = panel.overview.table
+    table.selectRow(0)
+    first = panel.overview._ruler_row
+    table.selectRow(_row_of_role(panel, analysis, SegmentRole.STRAIGHT))
+    assert panel.overview._ruler_row != first
+    assert table.rowCount() == len(analysis.bottlenecks) + 1
 
 
 def test_a_straight_run_has_no_corner_to_open(
