@@ -215,3 +215,101 @@ QLabel#cornerDegreeValue {{
 }}
 QLabel#cornerHint {{ color: {TEXT_MUTED}; font-size: 11px; }}
 """
+
+
+SCENARIO_STYLESHEET = f"""
+QWidget#scenarioSidebar {{
+    background: {PANEL_BASE};
+    border-right: 1px solid {BORDER};
+}}
+QWidget#scenarioResults {{
+    background: {CARD};
+    border-left: 1px solid {BORDER};
+}}
+QToolButton#scenarioSegment {{
+    min-height: 26px;
+    padding: 2px 8px;
+    border: 1px solid {INPUT_BORDER};
+    border-radius: 4px;
+    background: {CARD};
+    color: {TEXT_SECONDARY};
+    font-size: 11px;
+}}
+QToolButton#scenarioSegment:checked {{
+    background: {ACCENT_TINT};
+    border-color: {ACCENT_BORDER};
+    color: {ACCENT_DEEP};
+    font-weight: 700;
+}}
+QToolButton#scenarioSegment:disabled {{ color: {TEXT_FAINT}; background: {HEADER_BASE}; }}
+QToolButton#scenarioCard {{
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    background: {CARD};
+    padding: 6px 4px;
+    color: {TEXT_PRIMARY};
+    font-size: 11px;
+    font-weight: 600;
+}}
+QToolButton#scenarioCard:checked {{
+    background: {ACCENT_TINT};
+    border-color: {ACCENT_BORDER};
+}}
+QLabel#scenarioCardSubtitle {{ color: {TEXT_MUTED}; font-size: 10px; }}
+QLabel#scenarioFixedGear {{
+    background: {HEADER_BASE};
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: {TEXT_MUTED};
+    font-size: 11px;
+}}
+QLabel#scenarioHint, QLabel#scenarioFootnote {{ color: {TEXT_MUTED}; font-size: 11px; }}
+QLabel#scenarioRowLabel {{ color: {TEXT_SECONDARY}; font-size: 12px; }}
+QLabel#scenarioRowValue {{
+    color: {TEXT_SECONDARY};
+    font-family: "Consolas", "DejaVu Sans Mono", monospace;
+    font-size: 12px;
+}}
+QLabel#scenarioRowValue[kind="solved"] {{ color: {SUCCESS}; font-weight: 700; }}
+QLabel#scenarioRowValue[kind="offset"] {{ color: {ACCENT_DEEP}; font-weight: 700; }}
+QLabel#scenarioRowValue[state="danger"] {{ color: {DANGER}; font-weight: 700; }}
+QLabel#scenarioRowValue[state="warning"] {{ color: {WARNING}; font-weight: 700; }}
+QLabel#scenarioRowValue[state="success"] {{ color: {SUCCESS}; font-weight: 700; }}
+QFrame#scenarioCanvas {{
+    background: {CANVAS_BASE};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+QLabel#scenarioTitle {{ color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 600; }}
+QFrame#scenarioCard {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+QFrame#scenarioCard[tone="quiet"] {{ background: {CANVAS_BASE}; border-color: {BORDER_FAINT}; }}
+QLabel#scenarioCardTitle {{ color: {TEXT_PRIMARY}; font-size: 12px; font-weight: 600; }}
+QLabel#scenarioNotice {{
+    background: {WARNING_TINT};
+    border: 1px solid {WARNING_BORDER};
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: {WARNING};
+    font-size: 11px;
+}}
+QGroupBox#scenarioGroup {{
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    background: {CARD};
+    margin-top: 9px;
+    padding-top: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QGroupBox#scenarioGroup::title {{
+    subcontrol-origin: margin;
+    left: 9px;
+    padding: 0 4px;
+    color: {TEXT_PRIMARY};
+}}
+"""
