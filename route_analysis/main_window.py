@@ -79,6 +79,7 @@ from route_analysis.models import (
     VehicleDimensions,
 )
 from route_analysis.path_details_panel import PathDetailsPanel
+from route_analysis.scenario_panel import ScenarioPanel
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import (
     ConfigRepository,
@@ -262,7 +263,7 @@ class MainWindow(QMainWindow):
         self.canvas.lane_endpoint_selected.connect(self._lane_endpoint_selected)
         self.canvas.lane_pick_cancelled.connect(lambda _path: self._finish_lane_pick())
         self.canvas_tabs = QTabWidget()
-        self.canvas_tabs.setAccessibleName("地图与通行余量")
+        self.canvas_tabs.setAccessibleName("地图、通行余量与场景速算")
         self.canvas_tabs.addTab(self.canvas, "地图")
         self.clearance_panel = ClearancePanel()
         self.clearance_panel.pose_selected.connect(self._clearance_pose_selected)
@@ -270,6 +271,13 @@ class MainWindow(QMainWindow):
         self.clearance_panel.export_csv_requested.connect(self.export_offset_table)
         self.clearance_panel.export_pdf_requested.connect(self.export_clearance_report)
         self.canvas_tabs.addTab(self.clearance_panel, "通行余量")
+        self.scenario_panel = ScenarioPanel()
+        default_vehicle = self.config.default_vehicle
+        if default_vehicle is not None:
+            self.scenario_panel.set_vehicle_defaults(
+                default_vehicle, self.config.analysis.clearance_threshold
+            )
+        self.canvas_tabs.addTab(self.scenario_panel, "场景速算")
         self.canvas_tabs.currentChanged.connect(self._canvas_tab_changed)
         right.addWidget(self.canvas_tabs)
         right.addWidget(self.control_panel)

@@ -591,17 +591,37 @@ def _loaded_window(qtbot: QtBot, tmp_path: Path) -> MainWindow:
     return window
 
 
-def test_canvas_area_offers_the_map_and_the_clearance_tab(qtbot: QtBot, tmp_path: Path) -> None:
+def test_canvas_area_offers_the_map_clearance_and_scenario_tabs(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
     make_config(tmp_path)
     window = MainWindow(
         tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
     )
     qtbot.addWidget(window)
-    assert window.canvas_tabs.count() == 2
+    assert window.canvas_tabs.count() == 3
     assert window.canvas_tabs.tabText(0) == "地图"
     assert window.canvas_tabs.tabText(1) == "通行余量"
+    assert window.canvas_tabs.tabText(2) == "场景速算"
     assert window.canvas_tabs.widget(0) is window.canvas
+    assert window.canvas_tabs.widget(2) is window.scenario_panel
     assert window.canvas_tabs.currentIndex() == 0
+
+
+def test_the_scenario_tab_works_with_no_command_selected(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Fully offline: usable with no command selected, seeded from config.json."""
+
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    panel = window.scenario_panel
+    assert panel.isEnabled()
+    assert panel.vehicle_inputs.dimensions == window.config.default_vehicle
+    assert panel.vehicle_inputs.threshold == window.config.analysis.clearance_threshold
 
 
 def test_clearance_is_not_solved_while_its_tab_is_hidden(qtbot: QtBot, tmp_path: Path) -> None:
