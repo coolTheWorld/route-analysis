@@ -29,6 +29,8 @@ from route_analysis.models import (
 )
 from route_analysis.parsing import parse_command_details
 from route_analysis.path_details_panel import PathDetailsPanel
+from route_analysis.scenario_geometry import Scenario, SolveMode
+from route_analysis.scenario_panel import ScenarioPanel
 from route_analysis.storage import LaneLayout
 from route_analysis.theme import APPLICATION_STYLESHEET, select_cjk_font
 from route_analysis.turn_measurements import (
@@ -204,6 +206,7 @@ def main() -> int:
 
     clearance_saved = render_clearance(app, output)
     corner_saved = render_corner(app, output)
+    scenario_saved = render_scenario(app, output)
     return (
         0
         if overview_saved
@@ -212,6 +215,7 @@ def main() -> int:
         and draft_saved
         and clearance_saved
         and corner_saved
+        and scenario_saved
         else 1
     )
 
@@ -359,6 +363,24 @@ def render_clearance(app: QApplication, output: Path) -> bool:
     _wait_for(app, lambda: panel.selected_zones() is not None)
     clearance_output = output.with_name(f"{output.stem}-clearance{output.suffix}")
     return bool(window.grab().save(str(clearance_output)))
+
+
+def render_scenario(app: QApplication, output: Path) -> bool:
+    """Grab the rapid-estimate tab in the variant that exercises every result card."""
+
+    panel = ScenarioPanel()
+    window = QMainWindow()
+    window.setWindowTitle(f"Suntae 路径通行分析 {__version__} — 场景速算视觉检查")
+    window.setCentralWidget(panel)
+    window.resize(1280, 800)
+    window.show()
+    app.processEvents()
+    panel.select_variant(
+        scenario=Scenario.UTURN, mode=SolveMode.CHECK, extreme=True, bidirectional=True
+    )
+    _wait_for(app, lambda: panel.result is not None and panel.result.inputs.extreme)
+    scenario_output = output.with_name(f"{output.stem}-scenario{output.suffix}")
+    return bool(window.grab().save(str(scenario_output)))
 
 
 if __name__ == "__main__":
