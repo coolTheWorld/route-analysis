@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,10 +14,8 @@ from route_analysis.models import PosePoint, VehicleDimensions
 from route_analysis.storage import _atomic_json_write, _read_json
 from route_analysis.turn_radius import TurnRadiusSection, calculate_turn_radius
 
-
-class MeasurementSource(StrEnum):
-    AUTOMATIC = "automatic"
-    MANUAL = "manual"
+LEGACY_AUTOMATIC_SOURCE = "automatic"
+"""Records written by the removed automatic calculation; dropped when read."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +53,6 @@ class MeasurementScope:
 class RadiusMeasurementRecord:
     id: str
     name: str
-    source: MeasurementSource
     start_index: int
     end_index: int
     created_order: int
@@ -77,85 +73,20 @@ class CalculatedMeasurement:
 @dataclass(slots=True)
 class RadiusMeasurementState:
     path_fingerprint: str
-    automatic_counter: int = 0
     manual_counter: int = 0
     _records: list[RadiusMeasurementRecord] = field(default_factory=list)
 
     @property
-    def automatic_records(self) -> tuple[RadiusMeasurementRecord, ...]:
-        return tuple(
-            sorted(
-                (
-                    record
-                    for record in self._records
-                    if record.source is MeasurementSource.AUTOMATIC
-                ),
-                key=lambda record: (record.start_index, record.end_index, record.created_order),
-            )
-        )
-
-    @property
-    def manual_records(self) -> tuple[RadiusMeasurementRecord, ...]:
-        return tuple(
-            sorted(
-                (record for record in self._records if record.source is MeasurementSource.MANUAL),
-                key=lambda record: record.created_order,
-            )
-        )
-
-    @property
     def records(self) -> tuple[RadiusMeasurementRecord, ...]:
-        return self.automatic_records + self.manual_records
+        return tuple(sorted(self._records, key=lambda record: record.created_order))
 
-    def _next_default_name(self, source: MeasurementSource) -> tuple[str, int]:
+    def _next_default_name(self) -> tuple[str, int]:
         used = {record.name for record in self._records}
         while True:
-            if source is MeasurementSource.AUTOMATIC:
-                self.automatic_counter += 1
-                counter = self.automatic_counter
-                prefix = "自动半径"
-            else:
-                self.manual_counter += 1
-                counter = self.manual_counter
-                prefix = "手动半径"
-            name = f"{prefix} {counter}"
+            self.manual_counter += 1
+            name = f"手动半径 {self.manual_counter}"
             if name not in used:
-                return name, counter
-
-    def replace_automatic(
-        self, endpoint_pairs: Iterable[tuple[int, int]]
-    ) -> tuple[RadiusMeasurementRecord, ...]:
-        existing = {
-            (record.start_index, record.end_index): record
-            for record in self._records
-            if record.source is MeasurementSource.AUTOMATIC
-        }
-        manual = [
-            record for record in self._records if record.source is MeasurementSource.MANUAL
-        ]
-        automatic: list[RadiusMeasurementRecord] = []
-        seen: set[tuple[int, int]] = set()
-        for start_index, end_index in endpoint_pairs:
-            pair = (start_index, end_index)
-            if pair in seen:
-                continue
-            seen.add(pair)
-            if start_index < 0 or end_index <= start_index:
-                raise ValueError("measurement endpoints must be ordered")
-            record = existing.get(pair)
-            if record is None:
-                name, order = self._next_default_name(MeasurementSource.AUTOMATIC)
-                record = RadiusMeasurementRecord(
-                    uuid4().hex,
-                    name,
-                    MeasurementSource.AUTOMATIC,
-                    start_index,
-                    end_index,
-                    order,
-                )
-            automatic.append(record)
-        self._records = manual + automatic
-        return self.automatic_records
+                return name, self.manual_counter
 
     def add_manual(
         self, start_index: int, end_index: int
@@ -166,23 +97,14 @@ class RadiusMeasurementState:
             (
                 record
                 for record in self._records
-                if record.source is MeasurementSource.MANUAL
-                and record.start_index == start_index
-                and record.end_index == end_index
+                if record.start_index == start_index and record.end_index == end_index
             ),
             None,
         )
         if duplicate is not None:
             return duplicate, False
-        name, order = self._next_default_name(MeasurementSource.MANUAL)
-        record = RadiusMeasurementRecord(
-            uuid4().hex,
-            name,
-            MeasurementSource.MANUAL,
-            start_index,
-            end_index,
-            order,
-        )
+        name, order = self._next_default_name()
+        record = RadiusMeasurementRecord(uuid4().hex, name, start_index, end_index, order)
         self._records.append(record)
         return record, True
 
@@ -201,7 +123,6 @@ class RadiusMeasurementState:
             renamed = RadiusMeasurementRecord(
                 record.id,
                 normalized,
-                record.source,
                 record.start_index,
                 record.end_index,
                 record.created_order,
@@ -215,21 +136,14 @@ class RadiusMeasurementState:
         self._records = [record for record in self._records if record.id != measurement_id]
         return len(self._records) != before
 
-    def clear_automatic(self) -> None:
-        self._records = [
-            record for record in self._records if record.source is MeasurementSource.MANUAL
-        ]
-
     def to_dict(self) -> dict[str, object]:
         return {
             "pathFingerprint": self.path_fingerprint,
-            "automaticCounter": self.automatic_counter,
             "manualCounter": self.manual_counter,
             "records": [
                 {
                     "id": record.id,
                     "name": record.name,
-                    "source": record.source.value,
                     "startIndex": record.start_index,
                     "endIndex": record.end_index,
                     "createdOrder": record.created_order,
@@ -248,29 +162,24 @@ class RadiusMeasurementState:
             for raw_record in raw_records:
                 if not isinstance(raw_record, Mapping):
                     raise ValueError("measurement record must be an object")
+                if raw_record.get("source") == LEGACY_AUTOMATIC_SOURCE:
+                    continue
                 records.append(
                     RadiusMeasurementRecord(
                         str(raw_record["id"]),
                         str(raw_record["name"]),
-                        MeasurementSource(str(raw_record["source"])),
                         int(raw_record["startIndex"]),
                         int(raw_record["endIndex"]),
                         int(raw_record["createdOrder"]),
                     )
                 )
-            raw_automatic_counter = payload.get("automaticCounter", 0)
             raw_manual_counter = payload.get("manualCounter", 0)
-            if not isinstance(raw_automatic_counter, int) or isinstance(
-                raw_automatic_counter, bool
-            ):
-                raise ValueError("automaticCounter must be an integer")
             if not isinstance(raw_manual_counter, int) or isinstance(
                 raw_manual_counter, bool
             ):
                 raise ValueError("manualCounter must be an integer")
             return cls(
                 path_fingerprint=str(payload["pathFingerprint"]),
-                automatic_counter=raw_automatic_counter,
                 manual_counter=raw_manual_counter,
                 _records=records,
             )

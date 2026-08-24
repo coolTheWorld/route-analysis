@@ -1,5 +1,4 @@
 import json
-import math
 from pathlib import Path
 
 import pytest
@@ -34,10 +33,7 @@ def test_config_defaults_tenant_and_round_trips_plaintext_password(tmp_path: Pat
     config.password = "plain-secret"
     config.default_vehicle = VehicleDimensions(1.2, 0.8, 1.4)
     config.default_lane_width = 2.5
-    config.analysis = AnalysisSettings(
-        turn_threshold=0.6,
-        lane_generation_deviation=0.03,
-    )
+    config.analysis = AnalysisSettings(lane_generation_deviation=0.03)
     config.lane_generation_mode = "bezier"
     config.log_level = "DEBUG"
 
@@ -50,7 +46,7 @@ def test_config_defaults_tenant_and_round_trips_plaintext_password(tmp_path: Pat
     assert "plain-secret" in raw
     assert "accessToken" not in raw
     assert "radius_window" not in raw
-    assert loaded.analysis.turn_threshold == 0.6
+    assert "turn_threshold" not in raw
     assert loaded.analysis.lane_generation_deviation == 0.03
     assert loaded.lane_generation_mode == "bezier"
     assert loaded.log_level == "DEBUG"
@@ -62,8 +58,8 @@ def test_old_config_ignores_radius_window_and_gets_new_defaults() -> None:
         {"connection": {}, "analysis": {"radius_window": 9.9}}
     )
 
-    assert loaded.analysis.turn_threshold == pytest.approx(math.pi / 6)
     assert not hasattr(loaded.analysis, "radius_window")
+    assert not hasattr(loaded.analysis, "turn_threshold")
     analysis = loaded.to_dict()["analysis"]
     assert isinstance(analysis, dict)
     assert "radius_window" not in analysis

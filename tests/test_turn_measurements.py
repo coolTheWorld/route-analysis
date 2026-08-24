@@ -4,8 +4,8 @@ import pytest
 
 from route_analysis.models import PosePoint, VehicleDimensions
 from route_analysis.turn_measurements import (
+    LEGACY_AUTOMATIC_SOURCE,
     MeasurementScope,
-    MeasurementSource,
     RadiusMeasurementRepository,
     RadiusMeasurementState,
     path_fingerprint,
@@ -29,23 +29,37 @@ def test_path_fingerprint_includes_order_coordinates_and_yaw() -> None:
     assert path_fingerprint(changed_yaw) != path_fingerprint(points)
 
 
-def test_automatic_replace_preserves_matching_names_and_manual_records() -> None:
-    state = RadiusMeasurementState(path_fingerprint="fingerprint")
-    first = state.replace_automatic(((0, 2), (2, 4)))
-    assert [record.name for record in first] == ["自动半径 1", "自动半径 2"]
-    state.rename(first[1].id, "南侧弯道")
-    manual, created = state.add_manual(0, 4)
-    assert created is True
-    assert manual.name == "手动半径 1"
+def test_legacy_automatic_records_are_dropped_when_reading_an_old_file() -> None:
+    payload = {
+        "pathFingerprint": "fingerprint",
+        "automaticCounter": 2,
+        "manualCounter": 1,
+        "records": [
+            {
+                "id": "a",
+                "name": "自动半径 1",
+                "source": LEGACY_AUTOMATIC_SOURCE,
+                "startIndex": 0,
+                "endIndex": 2,
+                "createdOrder": 1,
+            },
+            {
+                "id": "b",
+                "name": "手动半径 1",
+                "source": "manual",
+                "startIndex": 1,
+                "endIndex": 3,
+                "createdOrder": 1,
+            },
+        ],
+    }
 
-    replaced = state.replace_automatic(((2, 4), (4, 6)))
+    state = RadiusMeasurementState.from_dict(payload)
 
-    assert [(record.start_index, record.end_index) for record in replaced] == [
-        (2, 4),
-        (4, 6),
-    ]
-    assert [record.name for record in replaced] == ["南侧弯道", "自动半径 3"]
-    assert state.manual_records == (manual,)
+    assert [record.name for record in state.records] == ["手动半径 1"]
+    assert state.manual_counter == 1
+    assert "automaticCounter" not in state.to_dict()
+    assert "source" not in state.to_dict()["records"][0]
 
 
 def test_manual_duplicate_is_located_and_names_are_unique() -> None:
@@ -63,19 +77,16 @@ def test_manual_duplicate_is_located_and_names_are_unique() -> None:
         state.rename(second.id, "  ")
 
 
-def test_deleted_names_are_not_reused_and_clearing_auto_preserves_manual() -> None:
+def test_deleted_names_are_not_reused_and_missing_ids_report_no_deletion() -> None:
     state = RadiusMeasurementState(path_fingerprint="fingerprint")
-    automatic = state.replace_automatic(((0, 2),))[0]
     first_manual, _created = state.add_manual(1, 3)
 
     assert state.delete(first_manual.id) is True
     second_manual, _created = state.add_manual(2, 4)
     assert second_manual.name == "手动半径 2"
 
-    state.clear_automatic()
-    assert state.automatic_records == ()
-    assert state.manual_records == (second_manual,)
-    assert state.delete(automatic.id) is False
+    assert state.records == (second_manual,)
+    assert state.delete(first_manual.id) is False
 
 
 def test_repository_isolates_scope_and_invalidates_changed_paths(tmp_path: Path) -> None:
@@ -92,15 +103,15 @@ def test_repository_isolates_scope_and_invalidates_changed_paths(tmp_path: Path)
     isolated = repository.load(other_scope, fingerprint)
     invalidated = repository.load(first_scope, path_fingerprint(points[:-1]))
 
-    assert len(loaded.manual_records) == 1
+    assert len(loaded.records) == 1
     assert isolated.records == ()
     assert invalidated.records == ()
 
 
-def test_recalculation_keeps_invalid_automatic_result_and_skips_no_records() -> None:
+def test_recalculation_keeps_the_record_when_the_radius_cannot_be_calculated() -> None:
     points = (PosePoint(0, 0, 0), PosePoint(0, 0, 0.4), PosePoint(0, 0, 0.8))
     state = RadiusMeasurementState(path_fingerprint=path_fingerprint(points))
-    state.replace_automatic(((0, 2),))
+    state.add_manual(0, 2)
 
     measurements = recalculate_measurements(
         state,
@@ -109,7 +120,6 @@ def test_recalculation_keeps_invalid_automatic_result_and_skips_no_records() -> 
     )
 
     assert len(measurements) == 1
-    assert measurements[0].record.source is MeasurementSource.AUTOMATIC
     assert measurements[0].radius.valid is False
     assert measurements[0].radius.error
 

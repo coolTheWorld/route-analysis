@@ -1,8 +1,9 @@
 import math
 
 import pytest
-from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsEllipseItem,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsTextItem,
+    QMenu,
     QStyleOptionGraphicsItem,
 )
 from pytestqt.qtbot import QtBot
@@ -19,6 +21,8 @@ from route_analysis.canvas import (
     PathPointsItem,
     RouteCanvas,
     marker_diameters,
+    neighbourhood_indices,
+    radius_candidate_indices,
 )
 from route_analysis.lane_generation import BendMode, generate_lane
 from route_analysis.models import (
@@ -471,9 +475,26 @@ def test_selected_whole_turn_draws_five_labeled_radius_trajectories(qtbot: QtBot
     assert any(text.startswith("前轴中心") for text in texts)
 
 
-def test_manual_radius_mode_highlights_suggestions_selects_path_points_and_escapes(
-    qtbot: QtBot,
-) -> None:
+def _drive_pick_menu(position: int) -> None:
+    """Choose one entry of the modal endpoint menu once it opens, or close it."""
+
+    def act(attempt: int = 0) -> None:
+        popup = QApplication.activePopupWidget()
+        if not isinstance(popup, QMenu):
+            if attempt < 40:
+                QTimer.singleShot(10, lambda: act(attempt + 1))
+            return
+        if position < 0:
+            popup.close()
+            return
+        for _ in range(position + 1):
+            QTest.keyClick(popup, Qt.Key.Key_Down)
+        QTest.keyClick(popup, Qt.Key.Key_Return)
+
+    QTimer.singleShot(10, lambda: act())
+
+
+def test_manual_radius_mode_opens_the_pick_menu_and_escapes(qtbot: QtBot) -> None:
     canvas = RouteCanvas()
     canvas.resize(800, 500)
     qtbot.addWidget(canvas)
@@ -482,17 +503,60 @@ def test_manual_radius_mode_highlights_suggestions_selects_path_points_and_escap
     canvas.set_paths(path, (), VehicleDimensions(1, 1, 1))
     items_before = len(canvas.scene().items())
 
-    canvas.set_manual_radius_mode("dispatched", {0, 2})
+    canvas.set_manual_radius_mode("dispatched")
 
-    assert len(canvas.scene().items()) > items_before
+    # Entering the mode alone must not draw anything; markers only follow a pick.
+    assert len(canvas.scene().items()) == items_before
     point = canvas.mapFromScene(1, 0)
-    with qtbot.waitSignal(canvas.radius_endpoint_selected, timeout=1000) as selected:
+    _drive_pick_menu(1)
+    with qtbot.waitSignal(canvas.radius_endpoint_selected, timeout=2000) as selected:
         qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
     assert selected.args == ["dispatched", 1]
 
     with qtbot.waitSignal(canvas.manual_radius_cancelled, timeout=1000) as cancelled:
         qtbot.keyClick(canvas, Qt.Key.Key_Escape)
     assert cancelled.args == ["dispatched"]
+
+
+def test_pick_menu_offers_neighbours_so_a_nearby_sample_can_be_chosen(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    path = tuple(PosePoint(index, 0, 0) for index in range(9))
+    canvas.set_paths(path, (), VehicleDimensions(1, 1, 1))
+    canvas.set_manual_radius_mode("dispatched")
+    point = canvas.mapFromScene(4, 0)
+
+    # The menu lists samples 2..6; the third entry is the sample two before the click.
+    _drive_pick_menu(0)
+    with qtbot.waitSignal(canvas.radius_endpoint_selected, timeout=2000) as selected:
+        qtbot.mouseClick(canvas.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    assert selected.args == ["dispatched", 2]
+
+
+def test_dismissing_the_pick_menu_selects_no_endpoint(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    canvas.resize(800, 500)
+    qtbot.addWidget(canvas)
+    canvas.show()
+    path = tuple(PosePoint(index, 0, 0) for index in range(9))
+    canvas.set_paths(path, (), VehicleDimensions(1, 1, 1))
+    canvas.set_manual_radius_mode("dispatched")
+    picked: list[tuple[str, int]] = []
+    canvas.radius_endpoint_selected.connect(lambda name, index: picked.append((name, index)))
+
+    _drive_pick_menu(-1)
+    qtbot.mouseClick(
+        canvas.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=canvas.mapFromScene(4, 0),
+    )
+
+    assert picked == []
 
 
 def test_selected_path_point_highlight_is_independent_of_normal_path_layers(
@@ -785,3 +849,99 @@ def test_crowded_pose_points_shrink_but_all_of_them_are_still_drawn(qtbot: QtBot
     )
 
     assert _drawn_marker_count(item, 30.0, 180) == len(points)
+
+
+def _radius_marker_labels(canvas: RouteCanvas) -> list[str]:
+    return sorted(
+        item.toPlainText()
+        for item in canvas.scene().items()
+        if isinstance(item, QGraphicsTextItem)
+    )
+
+
+def test_neighbourhood_indices_covers_two_samples_on_each_side() -> None:
+    assert neighbourhood_indices(10, 5) == (3, 4, 5, 6, 7)
+
+
+def test_neighbourhood_indices_shortens_at_both_ends_instead_of_shifting() -> None:
+    assert neighbourhood_indices(10, 0) == (0, 1, 2)
+    assert neighbourhood_indices(10, 1) == (0, 1, 2, 3)
+    assert neighbourhood_indices(10, 9) == (7, 8, 9)
+    assert neighbourhood_indices(3, 1) == (0, 1, 2)
+
+
+def test_neighbourhood_indices_rejects_out_of_range_centres_and_bad_spans() -> None:
+    assert neighbourhood_indices(0, 0) == ()
+    assert neighbourhood_indices(5, 5) == ()
+    assert neighbourhood_indices(5, -1) == ()
+    with pytest.raises(ValueError, match="span"):
+        neighbourhood_indices(5, 2, -1)
+
+
+def test_only_the_picked_endpoint_is_highlighted_on_the_canvas(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    path = tuple(PosePoint(index, 0, 0) for index in range(8))
+    canvas.set_paths(
+        path,
+        (),
+        VehicleDimensions(1, 1, 1),
+        source_indices={"dispatched": tuple(range(10, 18))},
+    )
+    canvas.set_manual_radius_mode("dispatched")
+
+    canvas.set_manual_radius_endpoints((4,))
+
+    # Neighbours stay plain centerline points; only source index 14 is marked, as "15".
+    assert _radius_marker_labels(canvas) == ["15"]
+
+
+def test_both_manual_radius_endpoints_stay_marked_until_the_markers_are_cleared(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    path = tuple(PosePoint(index, 0, 0) for index in range(12))
+    canvas.set_paths(path, (), VehicleDimensions(1, 1, 1))
+    canvas.set_manual_radius_mode("dispatched")
+
+    canvas.set_manual_radius_endpoints((2, 9))
+
+    assert _radius_marker_labels(canvas) == ["10", "3"]
+
+    canvas.set_manual_radius_endpoints(())
+
+    assert _radius_marker_labels(canvas) == []
+
+
+def test_radius_candidate_indices_offer_the_closest_sample_and_its_neighbours() -> None:
+    assert radius_candidate_indices(20, [8]) == (6, 7, 8, 9, 10)
+
+
+def test_radius_candidate_indices_keep_far_apart_hits_reachable() -> None:
+    # A doubled-back path can put two hit samples far apart in path order.
+    assert radius_candidate_indices(20, [8, 17]) == (6, 7, 8, 9, 10, 17)
+
+
+def test_radius_candidate_indices_shorten_at_the_path_ends() -> None:
+    assert radius_candidate_indices(20, [0]) == (0, 1, 2)
+    assert radius_candidate_indices(20, [19]) == (17, 18, 19)
+    assert radius_candidate_indices(3, [1]) == (0, 1, 2)
+
+
+def test_radius_candidate_indices_drop_out_of_range_hits_and_empty_input() -> None:
+    assert radius_candidate_indices(20, []) == ()
+    assert radius_candidate_indices(20, [8, 99, -3]) == (6, 7, 8, 9, 10)
+
+
+def test_leaving_manual_radius_mode_clears_the_endpoint_markers(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    qtbot.addWidget(canvas)
+    path = tuple(PosePoint(index, 0, 0) for index in range(8))
+    canvas.set_paths(path, (), VehicleDimensions(1, 1, 1))
+    canvas.set_manual_radius_mode("dispatched")
+    canvas.set_manual_radius_endpoints((4,))
+
+    canvas.set_manual_radius_mode(None)
+
+    assert _radius_marker_labels(canvas) == []

@@ -13,12 +13,14 @@ from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QFont,
     QKeyEvent,
     QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
     QPolygonF,
+    QTransform,
     QUndoCommand,
     QUndoStack,
     QWheelEvent,
@@ -62,6 +64,43 @@ PATH_POINT_DIAMETER_PX = 7.0
 INACTIVE_PATH_POINT_DIAMETER_PX = 5.0
 PATH_POINT_MIN_DIAMETER_PX = 1.4
 PATH_POINT_CROWDING_FACTOR = 0.8
+RADIUS_ENDPOINT_DIAMETER_PX = 16.0
+RADIUS_NEIGHBOUR_SPAN = 2
+RADIUS_ENDPOINT_COLOR = "#b4233f"
+
+
+def radius_candidate_indices(
+    count: int,
+    candidates: Sequence[int],
+    span: int = RADIUS_NEIGHBOUR_SPAN,
+) -> tuple[int, ...]:
+    """Return every sample the endpoint pick menu offers, ordered by path position.
+
+    The menu combines the neighbourhood of the closest clicked sample with every other
+    sample the click actually hit, so samples that share one screen position stay
+    reachable even when the path doubles back and their indices are far apart.
+    """
+    if not candidates:
+        return ()
+    offered = set(candidates) | set(neighbourhood_indices(count, candidates[0], span))
+    return tuple(sorted(index for index in offered if 0 <= index < count))
+
+
+def neighbourhood_indices(
+    count: int,
+    center: int,
+    span: int = RADIUS_NEIGHBOUR_SPAN,
+) -> tuple[int, ...]:
+    """Return ``center`` plus up to ``span`` samples on each side, clamped to the path.
+
+    Near either end of the path fewer neighbours exist, so the window is simply shorter
+    rather than being shifted to keep a fixed length.
+    """
+    if span < 0:
+        raise ValueError("neighbourhood span must not be negative")
+    if count <= 0 or not 0 <= center < count:
+        return ()
+    return tuple(range(max(0, center - span), min(count - 1, center + span) + 1))
 
 
 def marker_diameters(
@@ -296,8 +335,7 @@ class RouteCanvas(QGraphicsView):
         self._turn_radius_layer = False
         self._selected_radius: tuple[str, TurnRadiusSection] | None = None
         self._manual_radius_path: str | None = None
-        self._manual_radius_suggestions: set[int] = set()
-        self._manual_radius_start: int | None = None
+        self._manual_radius_endpoints: tuple[int, ...] = ()
 
         self.undo_stack = QUndoStack(self)
         self._rebuild_scene()
@@ -437,8 +475,7 @@ class RouteCanvas(QGraphicsView):
         self._pending_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
-        self._manual_radius_suggestions.clear()
-        self._manual_radius_start = None
+        self._manual_radius_endpoints = ()
         self._rebuild_scene()
         self.fit_content()
 
@@ -456,8 +493,7 @@ class RouteCanvas(QGraphicsView):
         self._pending_path_click = None
         self._selected_radius = None
         self._manual_radius_path = None
-        self._manual_radius_suggestions.clear()
-        self._manual_radius_start = None
+        self._manual_radius_endpoints = ()
         self._rebuild_scene()
         self.fit_content()
 
@@ -571,24 +607,20 @@ class RouteCanvas(QGraphicsView):
         self._selected_radius = None
         self._rebuild_scene()
 
-    def set_manual_radius_mode(
-        self,
-        path_name: str | None,
-        suggested_indices: Iterable[int] = (),
-    ) -> None:
+    def set_manual_radius_mode(self, path_name: str | None) -> None:
         if path_name is not None and path_name not in self._paths:
             raise ValueError(f"unknown path: {path_name}")
         self._manual_radius_path = path_name
-        self._manual_radius_suggestions = set(suggested_indices)
-        self._manual_radius_start = None
+        self._manual_radius_endpoints = ()
         if path_name is None:
             self.unsetCursor()
         else:
             self.setCursor(Qt.CursorShape.CrossCursor)
         self._rebuild_scene()
 
-    def set_manual_radius_start(self, index: int | None) -> None:
-        self._manual_radius_start = index
+    def set_manual_radius_endpoints(self, indices: Iterable[int]) -> None:
+        """Show the picked endpoints and their neighbourhoods; empty clears the markers."""
+        self._manual_radius_endpoints = tuple(indices)
         self._rebuild_scene()
 
     def set_path_layer(
@@ -925,16 +957,25 @@ class RouteCanvas(QGraphicsView):
         candidates: list[int],
         event: QMouseEvent,
     ) -> int | None:
-        if len(candidates) == 1:
-            return candidates[0]
+        """Offer the clicked sample, its neighbours and any other hit sample in a menu."""
+        points = self._paths[path_name]
+        source_indices = self._path_source_indices[path_name]
+        offered = radius_candidate_indices(len(points), candidates)
+        if not offered:
+            return None
         menu = QMenu(self)
-        for index in candidates:
-            pose = self._paths[path_name][index]
+        for index in offered:
+            pose = points[index]
             yaw = "缺失" if pose.yaw is None else f"{pose.yaw:.6f} rad"
             action = menu.addAction(
-                f"样本 {index}  ({pose.x:.4f}, {pose.y:.4f})  yaw {yaw}"
+                f"样本 {source_indices[index] + 1}  "
+                f"({pose.x:.4f}, {pose.y:.4f})  yaw {yaw}"
             )
             action.setData(index)
+            if index == candidates[0]:
+                font = action.font()
+                font.setBold(True)
+                action.setFont(font)
         selected = menu.exec(event.globalPosition().toPoint())
         return None if selected is None else int(selected.data())
 
@@ -1396,28 +1437,41 @@ class RouteCanvas(QGraphicsView):
             self._add_draft_graphics()
 
     def _add_manual_radius_graphics(self) -> None:
-        if self._manual_radius_path is None:
+        """Highlight only the picked endpoints; neighbours stay plain centerline points."""
+        path_name = self._manual_radius_path
+        if path_name is None or not self._manual_radius_endpoints:
             return
-        points = self._paths[self._manual_radius_path]
-        marker_indices = set(self._manual_radius_suggestions)
-        if self._manual_radius_start is not None:
-            marker_indices.add(self._manual_radius_start)
-        for index in sorted(marker_indices):
+        points = self._paths[path_name]
+        source_indices = self._path_source_indices[path_name]
+        for index in sorted(set(self._manual_radius_endpoints)):
             if not 0 <= index < len(points):
                 continue
             pose = points[index]
             display = self.to_display(Point2D(pose.x, pose.y))
-            selected = index == self._manual_radius_start
-            radius = 0.16 if selected else 0.11
-            color = QColor("#b4233f" if selected else "#f4b400")
-            self.scene().addEllipse(
-                display.x - radius,
-                display.y - radius,
-                radius * 2,
-                radius * 2,
-                self._cosmetic_pen(color, 2),
-                QBrush(QColor("#ffffff")),
-            ).setZValue(52)
+            self._add_radius_endpoint_marker(display, source_indices[index])
+
+    def _add_radius_endpoint_marker(self, display: Point2D, source_index: int) -> None:
+        diameter = RADIUS_ENDPOINT_DIAMETER_PX
+        color = QColor(RADIUS_ENDPOINT_COLOR)
+        marker = self.scene().addEllipse(
+            QRectF(-diameter / 2, -diameter / 2, diameter, diameter),
+            self._cosmetic_pen(color, 2),
+            QBrush(QColor("#ffffff")),
+        )
+        marker.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        marker.setPos(display.x, display.y)
+        marker.setZValue(52)
+        label = self.scene().addText(str(source_index + 1))
+        label.setDefaultTextColor(color)
+        font = QFont(label.font())
+        font.setPointSizeF(8)
+        font.setBold(True)
+        label.setFont(font)
+        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        label.setPos(display.x, display.y)
+        offset = diameter / 2 + 1
+        label.setTransform(QTransform.fromTranslate(offset, -offset - 14))
+        label.setZValue(53)
 
     def _add_selected_path_point_graphics(self) -> None:
         if self._selected_path_point is None:
