@@ -94,6 +94,7 @@ class AppConfig:
     analysis: AnalysisSettings = field(default_factory=AnalysisSettings)
     snap_to_path: bool = True
     lane_generation_mode: str = "sharp"
+    lane_connection: str = "path"
     log_level: str = "INFO"
 
     @property
@@ -138,6 +139,7 @@ class AppConfig:
             },
             "snap_to_path": self.snap_to_path,
             "lane_generation_mode": self.lane_generation_mode,
+            "lane_connection": self.lane_connection,
             "log_level": self.log_level,
         }
 
@@ -154,8 +156,11 @@ class AppConfig:
             if not math.isfinite(map_direction):
                 raise ValueError
             generation_mode = str(payload.get("lane_generation_mode", "sharp"))
+            lane_connection = str(payload.get("lane_connection", "path"))
             log_level = str(payload.get("log_level", "INFO")).upper()
             if generation_mode not in {"sharp", "round", "bezier"}:
+                raise ValueError
+            if lane_connection not in {"path", "straight"}:
                 raise ValueError
             if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
                 raise ValueError
@@ -183,6 +188,7 @@ class AppConfig:
                 ),
                 snap_to_path=bool(payload.get("snap_to_path", True)),
                 lane_generation_mode=generation_mode,
+                lane_connection=lane_connection,
                 log_level=log_level,
             )
         except (TypeError, ValueError) as exc:
@@ -203,6 +209,8 @@ class ConfigRepository:
             raise StorageError("默认车道宽度必须大于零")
         if config.lane_generation_mode not in {"sharp", "round", "bezier"}:
             raise StorageError("自动车道弯道模式无效")
+        if config.lane_connection not in {"path", "straight"}:
+            raise StorageError("两点连接方式无效")
         if config.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise StorageError("日志级别无效")
         _atomic_json_write(self.path, config.to_dict(), backup=True)

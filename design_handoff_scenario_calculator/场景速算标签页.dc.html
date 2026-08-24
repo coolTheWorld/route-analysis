@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <title>Suntae 路径通行分析 · 场景速算</title>
+  <style>
+    html,body{margin:0;padding:0;height:100%;background:#e9edf3}
+    *{box-sizing:border-box}
+    a{color:#2474d8;text-decoration:none}
+    a:hover{color:#14395f;text-decoration:underline}
+    ::-webkit-scrollbar{width:11px;height:11px}
+    ::-webkit-scrollbar-track{background:#f4f7fb}
+    ::-webkit-scrollbar-thumb{background:#cfdae8;border:2px solid #f4f7fb;border-radius:6px}
+    ::-webkit-scrollbar-thumb:hover{background:#b9c5d6}
+    @keyframes omSpin{to{transform:rotate(360deg)}}
+    input:focus{outline:none}
+  </style>
+</helmet>
+<div data-screen-label="Suntae 路径通行分析" style="width:100%;height:100vh;min-width:1280px;display:flex;flex-direction:column;background:#f4f7fb;color:#172033;font-family:'Segoe UI','Microsoft YaHei UI',system-ui,sans-serif;font-size:13px;overflow:hidden">
+  <div style="height:34px;display:flex;align-items:center;padding-left:10px;flex:none;background:#f4f7fb">
+    <div style="width:16px;height:16px;border-radius:4px;background:#2474d8;display:flex;align-items:center;justify-content:center;margin-right:8px">
+      <svg viewBox="0 0 16 16" style="width:11px;height:11px"><path d="M3 13 V7 Q3 4 6 4 H13" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"></path></svg>
+    </div>
+    <div style="font-size:12px;color:#3d4a60">Suntae 路径通行分析</div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-self:stretch">
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:#3d4a60;font-size:11px" style-hover="background:#e3e9f1">─</div>
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:#3d4a60;font-size:10px" style-hover="background:#e3e9f1">▢</div>
+      <div style="width:44px;display:flex;align-items:center;justify-content:center;color:#3d4a60;font-size:11px" style-hover="background:#b4233f;color:#ffffff">✕</div>
+    </div>
+  </div>
+  <div style="height:27px;display:flex;align-items:stretch;padding:0 4px;flex:none;background:#f4f7fb;border-bottom:1px solid #e3e9f1">
+    <div style="padding:4px 10px;font-size:12.5px" style-hover="background:#dbeaff;border-radius:3px">文件</div>
+    <div style="padding:4px 10px;font-size:12.5px" style-hover="background:#dbeaff;border-radius:3px">编辑</div>
+    <div style="padding:4px 10px;font-size:12.5px" style-hover="background:#dbeaff;border-radius:3px">设置…</div>
+    <div style="padding:4px 10px;font-size:12.5px" style-hover="background:#dbeaff;border-radius:3px">帮助</div>
+  </div>
+  <div style="flex:1;display:flex;gap:5px;min-height:0;background:#f4f7fb;padding:0 1px">
+    <div style="width:362px;flex:none;background:#ffffff;border:1px solid #dce3ed;border-radius:8px;display:flex;flex-direction:column;padding:9px;gap:7px;min-height:0">
+      <div style="display:flex;gap:6px;align-items:center">
+        <div style="min-height:28px;padding:2px 10px;border:1px solid #b9c5d6;border-radius:5px;background:#ffffff;font-size:12.5px;display:flex;align-items:center;color:#8c96a5;background:#eef1f5">← 返回</div>
+        <div style="font-weight:600;font-size:14px">订单</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <div style="flex:1;min-height:28px;border:1px solid #b9c5d6;border-radius:4px;background:#ffffff;display:flex;align-items:center;padding:1px 6px;color:#8c96a5;font-size:12.5px">订单 ID（精确）</div>
+        <div style="min-height:28px;padding:2px 12px;border:1px solid #b9c5d6;border-radius:5px;background:#ffffff;font-size:12.5px;display:flex;align-items:center;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">查询</div>
+      </div>
+      <div style="flex:1;min-height:0;border:1px solid #d5dde8;border-radius:5px;background:#ffffff;overflow:auto">
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;position:sticky;top:0">
+          <div style="background:#eaf0f7;padding:6px;font-weight:600;font-size:12px;border-right:1px solid #d5dde8">订单 ID</div>
+          <div style="background:#eaf0f7;padding:6px;font-weight:600;font-size:12px;border-right:1px solid #d5dde8">地图</div>
+          <div style="background:#eaf0f7;padding:6px;font-weight:600;font-size:12px;border-right:1px solid #d5dde8">状态</div>
+          <div style="background:#eaf0f7;padding:6px;font-weight:600;font-size:12px">创建时间</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#dceaff;color:#10213d;font-size:12px">
+          <div style="padding:6px">9153</div><div style="padding:6px">F2-立库</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 21:07:44</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#f7f9fc;font-size:12px">
+          <div style="padding:6px">9152</div><div style="padding:6px">F2-立库</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 20:41:18</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#ffffff;font-size:12px">
+          <div style="padding:6px">9151</div><div style="padding:6px">F2-立库</div><div style="padding:6px">执行中</div><div style="padding:6px">2026-08-19 20:12:03</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#f7f9fc;font-size:12px">
+          <div style="padding:6px">9149</div><div style="padding:6px">一号仓</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 18:55:37</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#ffffff;font-size:12px">
+          <div style="padding:6px">9147</div><div style="padding:6px">一号仓</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 17:29:50</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#f7f9fc;font-size:12px">
+          <div style="padding:6px">9144</div><div style="padding:6px">F2-立库</div><div style="padding:6px">已取消</div><div style="padding:6px">2026-08-19 16:03:11</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#ffffff;font-size:12px">
+          <div style="padding:6px">9142</div><div style="padding:6px">一号仓</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 15:47:26</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#f7f9fc;font-size:12px">
+          <div style="padding:6px">9139</div><div style="padding:6px">F2-立库</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 14:18:09</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr 1.8fr;background:#ffffff;font-size:12px">
+          <div style="padding:6px">9137</div><div style="padding:6px">一号仓</div><div style="padding:6px">已完成</div><div style="padding:6px">2026-08-19 13:02:54</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div style="min-height:28px;padding:2px 10px;border:1px solid #b9c5d6;border-radius:5px;background:#ffffff;font-size:12.5px;display:flex;align-items:center;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">上一页</div>
+        <div style="flex:1;text-align:center;font-size:12.5px">第 1 页</div>
+        <div style="min-height:28px;padding:2px 10px;border:1px solid #b9c5d6;border-radius:5px;background:#ffffff;font-size:12.5px;display:flex;align-items:center;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">下一页</div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:flex-end;padding:4px 6px 0;flex:none">
+        <div data-tab="map" onClick="{{ onTab }}" style="padding:6px 15px;font-size:12.5px;cursor:pointer;border:1px solid #d5dde8;margin-right:2px;margin-bottom:-1px;border-radius:2px 2px 0 0;position:relative;{{ tabMapCss }}">地图</div>
+        <div data-tab="clear" onClick="{{ onTab }}" style="padding:6px 15px;font-size:12.5px;cursor:pointer;border:1px solid #d5dde8;margin-right:2px;margin-bottom:-1px;border-radius:2px 2px 0 0;position:relative;{{ tabClearCss }}">通行余量</div>
+        <div data-tab="calc" onClick="{{ onTab }}" style="padding:6px 15px;font-size:12.5px;cursor:pointer;border:1px solid #d5dde8;margin-right:2px;margin-bottom:-1px;border-radius:2px 2px 0 0;position:relative;background:#ffffff;font-weight:600;border-bottom-color:#ffffff;{{ tabCalcCss }}">场景速算</div>
+      </div>
+      <div style="flex:1;min-height:0;border:1px solid #d5dde8;background:#ffffff;display:flex">
+        <sc-if value="{{ isMap }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="地图" style="flex:1;background-color:#f7f9fc;background-image:linear-gradient(#dfe5ee 1px,transparent 1px),linear-gradient(90deg,#dfe5ee 1px,transparent 1px);background-size:28px 28px;position:relative">
+            <div style="position:absolute;left:10px;bottom:8px;font-size:11px;color:#8290a3">选择一条命令后在此显示下发 / 实际路径与车道</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isClear }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="通行余量" style="flex:1;min-width:0;display:flex;flex-direction:column;background:#f4f7fb">
+            <div style="flex:1;min-height:0;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+                <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;overflow:hidden"><div style="width:3px;background:#d5dde8"></div><div style="padding:10px 12px 10px 10px"><div style="font-size:11px;color:#6e7f93">状态</div><div style="font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:19px;font-weight:700">—</div><div style="font-size:11px;color:#6e7f93">等待命令</div></div></div>
+                <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;overflow:hidden"><div style="width:3px;background:#d5dde8"></div><div style="padding:10px 12px 10px 10px"><div style="font-size:11px;color:#6e7f93">最深越界</div><div style="font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:19px;font-weight:700">—</div><div style="font-size:11px;color:#6e7f93">m</div></div></div>
+                <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;overflow:hidden"><div style="width:3px;background:#d5dde8"></div><div style="padding:10px 12px 10px 10px"><div style="font-size:11px;color:#6e7f93">落在可行带外</div><div style="font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:19px;font-weight:700">—</div><div style="font-size:11px;color:#6e7f93">段</div></div></div>
+                <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;overflow:hidden"><div style="width:3px;background:#d5dde8"></div><div style="padding:10px 12px 10px 10px"><div style="font-size:11px;color:#6e7f93">可行带最窄</div><div style="font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:19px;font-weight:700">—</div><div style="font-size:11px;color:#6e7f93">m</div></div></div>
+                <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;overflow:hidden"><div style="width:3px;background:#d5dde8"></div><div style="padding:10px 12px 10px 10px"><div style="font-size:11px;color:#6e7f93">按建议偏置后</div><div style="font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:19px;font-weight:700">—</div><div style="font-size:11px;color:#6e7f93">m</div></div></div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;display:flex;flex-direction:column">
+                <div style="display:flex;align-items:baseline;gap:10px;padding:10px 12px 6px">
+                  <div style="font-size:13px;font-weight:600">净距剖面 + 可行偏置带</div>
+                  <div style="font-size:11px;color:#6e7f93">共用横轴 · 上下对齐读同一位置 · 点击图上任意处跳到地图定位</div>
+                </div>
+                <div style="height:300px;display:flex;align-items:center;justify-content:center;color:#6e7f93;font-size:12.5px">选择一条命令后显示通行余量</div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:stretch">
+                <div style="flex:1;min-width:0;background:#ffffff;border:1px solid #d5dde8;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div style="font-size:13px;font-weight:600">瓶颈排行榜</div>
+                    <div style="font-size:11px;color:#6e7f93">选中行下方给出该处三区标尺</div>
+                    <div style="flex:1"></div>
+                    <div style="min-height:26px;padding:2px 10px;border:1px solid #b9c5d6;border-radius:5px;background:#eef1f5;color:#8c96a5;font-size:12px;display:flex;align-items:center">进入转角求解</div>
+                  </div>
+                  <div style="border:1px solid #d5dde8;border-radius:5px;overflow:hidden">
+                    <div style="display:grid;grid-template-columns:26px 74px 1fr 84px 78px 68px;background:#eaf0f7;font-size:11px;font-weight:600">
+                      <div style="padding:5px 6px;border-right:1px solid #d5dde8">#</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">净距 m</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">位置</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">约束角</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">需偏置</div><div style="padding:5px 6px">进度</div>
+                    </div>
+                    <div style="height:118px;display:flex;align-items:center;justify-content:center;color:#8290a3;font-size:12px;background:#ffffff">—</div>
+                  </div>
+                </div>
+                <div style="width:400px;flex:none;background:#ffffff;border:1px solid #d5dde8;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="font-size:13px;font-weight:600">优化建议</div>
+                    <div style="border:1px solid #b9c5d6;border-radius:8px;padding:1px 7px;color:#6e7f93;font-size:10px">只建议 · 不修改</div>
+                  </div>
+                  <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#8290a3;font-size:12px;min-height:90px">选择一条命令后给出建议</div>
+                  <div style="display:flex;gap:8px">
+                    <div style="flex:1;min-height:28px;border:1px solid #b9c5d6;border-radius:5px;background:#eef1f5;color:#8c96a5;font-size:12px;display:flex;align-items:center;justify-content:center">导出偏置表 CSV</div>
+                    <div style="flex:1;min-height:28px;border:1px solid #b9c5d6;border-radius:5px;background:#eef1f5;color:#8c96a5;font-size:12px;display:flex;align-items:center;justify-content:center">导出 PDF 报告</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:none;background:#eaf0f7;border-top:1px solid #d5dde8;padding:5px 12px;display:flex;gap:10px;align-items:center;font-size:11px;color:#3d4a60">
+              <span>选择命令后计算</span><span style="color:#b9c5d6">|</span><span>阈值 0.05 m</span><span style="color:#b9c5d6">|</span><span>位置步长 0.05 m · 航向步长 0.02 rad</span>
+              <div style="flex:1"></div>
+              <div style="border:1px solid #b9c5d6;border-radius:8px;padding:1px 7px;color:#6e7f93;font-size:10px">只建议 · 不修改</div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isCalc }}" hint-placeholder-val="{{ true }}">
+          <div data-screen-label="场景速算" style="flex:1;min-width:0;display:flex;min-height:0">
+            <div style="width:290px;flex:none;background:#f4f7fb;border-right:1px solid #d5dde8;overflow-y:auto;padding:10px 10px 14px;display:flex;flex-direction:column;gap:14px">
+              <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;position:relative;margin-top:8px;padding:15px 10px 10px">
+                <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px">计算方向</div>
+                <div style="display:flex;border:1px solid #b9c5d6;border-radius:5px;overflow:hidden">
+                  <sc-for list="{{ modeSeg }}" as="s" hint-placeholder-count="2">
+                    <div data-k="{{ s.k }}" data-v="{{ s.v }}" onClick="{{ onSeg }}" style="{{ s.css }}">{{ s.label }}</div>
+                  </sc-for>
+                </div>
+                <div style="font-size:10.5px;color:#6e7f93;margin-top:6px;line-height:1.5">{{ modeHint }}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;position:relative;padding:15px 10px 10px">
+                <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px">场景</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                  <sc-for list="{{ typeTiles }}" as="t" hint-placeholder-count="4">
+                    <div data-k="type" data-v="{{ t.v }}" onClick="{{ onSeg }}" style="{{ t.css }}">
+                      <svg viewBox="0 0 26 26" style="width:24px;height:24px;flex:none"><path d="{{ t.icon }}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                      <div style="min-width:0">
+                        <div style="font-size:11.5px;font-weight:600;line-height:1.25">{{ t.label }}</div>
+                        <div style="font-size:9.5px;color:#6e7f93;line-height:1.3">{{ t.sub }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+                  <div style="width:52px;font-size:11.5px;color:#3d4a60">通行方向</div>
+                  <div style="flex:1;display:flex;border:1px solid #b9c5d6;border-radius:5px;overflow:hidden">
+                    <sc-for list="{{ dirSeg }}" as="s" hint-placeholder-count="2">
+                      <div data-k="{{ s.k }}" data-v="{{ s.v }}" onClick="{{ onSeg }}" style="{{ s.css }}">{{ s.label }}</div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                  <div style="width:52px;font-size:11.5px;color:#3d4a60">档位</div>
+                  <sc-if value="{{ gearFixed }}" hint-placeholder-val="{{ false }}">
+                    <div style="flex:1;min-height:24px;display:flex;align-items:center;justify-content:center;border:1px solid #dce3ed;border-radius:5px;background:#eef1f5;color:#6e7f93;font-size:11.5px">R档 → D档（本场景固定）</div>
+                  </sc-if>
+                  <sc-if value="{{ gearFree }}" hint-placeholder-val="{{ true }}">
+                    <div style="flex:1;display:flex;border:1px solid #b9c5d6;border-radius:5px;overflow:hidden">
+                      <sc-for list="{{ gearSeg }}" as="s" hint-placeholder-count="2">
+                        <div data-k="{{ s.k }}" data-v="{{ s.v }}" onClick="{{ onSeg }}" style="{{ s.css }}">{{ s.label }}</div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                  <div style="width:52px;font-size:11.5px;color:#3d4a60">工况</div>
+                  <div style="flex:1;display:flex;border:1px solid #b9c5d6;border-radius:5px;overflow:hidden">
+                    <sc-for list="{{ extSeg }}" as="s" hint-placeholder-count="2">
+                      <div data-k="{{ s.k }}" data-v="{{ s.v }}" onClick="{{ onSeg }}" style="{{ s.css }}">{{ s.label }}</div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="font-size:10.5px;color:#6e7f93;margin-top:7px;line-height:1.5">{{ extHint }}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;position:relative;padding:15px 10px 6px">
+                <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px">车辆参数</div>
+                <sc-for list="{{ vehRows }}" as="r" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                    <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.label }}</div>
+                    <div style="display:flex;align-items:stretch">
+                      <div style="position:relative;display:flex">
+                        <input type="text" value="{{ r.val }}" data-key="{{ r.key }}" onInput="{{ onNum }}" style="width:72px;min-height:25px;padding:1px 20px 1px 6px;border:1px solid #b9c5d6;border-radius:4px 0 0 4px;background:#ffffff;font-size:12px;font-family:Consolas,'DejaVu Sans Mono',monospace;color:#172033">
+                        <span style="position:absolute;right:5px;top:50%;transform:translateY(-50%);font-size:10.5px;color:#6e7f93;pointer-events:none">m</span>
+                      </div>
+                      <div style="display:flex;flex-direction:column;border:1px solid #b9c5d6;border-left:none;border-radius:0 4px 4px 0;overflow:hidden;width:17px">
+                        <div data-key="{{ r.key }}" data-step="{{ r.step }}" data-dec="{{ r.dec }}" onClick="{{ onSpin }}" style="flex:1;display:flex;align-items:center;justify-content:center;font-size:6.5px;color:#3d4a60;cursor:pointer;background:#ffffff" style-hover="background:#edf4ff">▲</div>
+                        <div data-key="{{ r.key }}" data-step="{{ r.negStep }}" data-dec="{{ r.dec }}" onClick="{{ onSpin }}" style="flex:1;display:flex;align-items:center;justify-content:center;font-size:6.5px;color:#3d4a60;cursor:pointer;background:#ffffff;border-top:1px solid #dce3ed" style-hover="background:#edf4ff">▼</div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+                <div style="font-size:10px;color:#8290a3;margin:2px 0 6px;line-height:1.5">坐标按叉车前轴中心解释；转弯半径为前轴中心圆弧半径。</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #d5dde8;border-radius:6px;position:relative;padding:15px 10px 6px">
+                <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px">道路参数</div>
+                <sc-for list="{{ roadRows }}" as="r" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                    <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.label }}</div>
+                    <div style="display:flex;align-items:stretch">
+                      <div style="position:relative;display:flex">
+                        <input type="text" value="{{ r.val }}" data-key="{{ r.key }}" onInput="{{ onNum }}" style="width:72px;min-height:25px;padding:1px 20px 1px 6px;border:1px solid #b9c5d6;border-radius:4px 0 0 4px;background:#ffffff;font-size:12px;font-family:Consolas,'DejaVu Sans Mono',monospace;color:#172033">
+                        <span style="position:absolute;right:5px;top:50%;transform:translateY(-50%);font-size:10.5px;color:#6e7f93;pointer-events:none">m</span>
+                      </div>
+                      <div style="display:flex;flex-direction:column;border:1px solid #b9c5d6;border-left:none;border-radius:0 4px 4px 0;overflow:hidden;width:17px">
+                        <div data-key="{{ r.key }}" data-step="{{ r.step }}" data-dec="{{ r.dec }}" onClick="{{ onSpin }}" style="flex:1;display:flex;align-items:center;justify-content:center;font-size:6.5px;color:#3d4a60;cursor:pointer;background:#ffffff" style-hover="background:#edf4ff">▲</div>
+                        <div data-key="{{ r.key }}" data-step="{{ r.negStep }}" data-dec="{{ r.dec }}" onClick="{{ onSpin }}" style="flex:1;display:flex;align-items:center;justify-content:center;font-size:6.5px;color:#3d4a60;cursor:pointer;background:#ffffff;border-top:1px solid #dce3ed" style-hover="background:#edf4ff">▼</div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+                <div style="font-size:10.5px;color:#6e7f93;margin:2px 0 6px;line-height:1.55">{{ roadHint }}</div>
+              </div>
+              <div style="font-size:10.5px;color:#6e7f93;line-height:1.6;padding:0 2px">偏移符号：弯道内侧为正、外侧为负。本页为纯几何速算，不连接调度后端，不写回任何数据。</div>
+            </div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:10px;gap:7px;background:#ffffff">
+              <div style="display:flex;align-items:center;gap:10px;flex:none">
+                <div style="font-size:13px;font-weight:600">{{ diaTitle }}</div>
+                <sc-if value="{{ busy }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;align-items:center;gap:5px;color:#6e7f93;font-size:11px">
+                    <div style="width:11px;height:11px;border:2px solid #cfdae8;border-top-color:#2474d8;border-radius:50%;animation:omSpin 0.8s linear infinite"></div>
+                    计算中…
+                  </div>
+                </sc-if>
+                <div style="flex:1"></div>
+                <sc-for list="{{ layerSeg }}" as="s" hint-placeholder-count="3">
+                  <div data-k="{{ s.k }}" onClick="{{ onLayer }}" style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11.5px;color:#3d4a60">
+                    <span style="{{ s.boxCss }}">{{ s.tick }}</span>{{ s.label }}
+                  </div>
+                </sc-for>
+              </div>
+              <div style="flex:1;min-height:0;border:1px solid #d5dde8;border-radius:6px;background:#f7f9fc;overflow:hidden;position:relative">
+                <svg viewBox="{{ vb }}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block">
+                  <path d="{{ gridD }}" stroke="#e6ebf2" stroke-width="1" fill="none" vector-effect="non-scaling-stroke"></path>
+                  <path d="{{ regionD }}" fill="rgba(79,141,216,0.12)" stroke="#3972b6" stroke-width="1.5" stroke-linejoin="miter" vector-effect="non-scaling-stroke"></path>
+                  <path d="{{ centerD }}" stroke="#8290a3" stroke-width="1" stroke-dasharray="6 5" fill="none" vector-effect="non-scaling-stroke"></path>
+                  <path d="{{ envD }}" fill="rgba(20,57,95,0.15)" stroke="none"></path>
+                  <path d="{{ pathRD }}" stroke="#2474d8" stroke-width="2" stroke-dasharray="7 4" fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+                  <path d="{{ pathDD }}" stroke="#2474d8" stroke-width="2.2" fill="none" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+                  <path d="{{ vioD }}" stroke="#b4233f" stroke-width="1.4" fill="rgba(239,71,111,0.10)" vector-effect="non-scaling-stroke"></path>
+                  {{ annos }}
+                </svg>
+              </div>
+              <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;flex:none;font-size:10.5px;color:#3d4a60;padding:0 2px">
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:9px;background:rgba(79,141,216,0.15);border:1px solid #3972b6"></span>可通行区域</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:9px;background:rgba(20,57,95,0.18)"></span>车辆扫掠范围</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:0;border-top:2.2px solid #2474d8"></span>路径 D档</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:0;border-top:2px dashed #2474d8"></span>路径 R档</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:0;border-top:1px dashed #8290a3"></span>道路中心线</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:9px;background:rgba(239,71,111,0.10);border:1px solid #b4233f"></span>越界位姿</div>
+                <div style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:#ef476f;border:1px solid #a10f2b"></span>最小净距点</div>
+              </div>
+            </div>
+            <div style="width:314px;flex:none;border-left:1px solid #d5dde8;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px;background:#ffffff">
+              <div style="{{ stCardCss }}">
+                <div style="{{ stBarCss }}"></div>
+                <div style="padding:10px 12px 10px 10px;min-width:0">
+                  <div style="font-size:11px;color:#6e7f93">{{ stTitle }}</div>
+                  <div style="{{ stValCss }}">{{ stValue }}</div>
+                  <div style="font-size:11px;color:#6e7f93;font-family:Consolas,'DejaVu Sans Mono',monospace">{{ stUnit }}</div>
+                  <div style="font-size:10.5px;color:#6e7f93;margin-top:4px;line-height:1.5">{{ stNote }}</div>
+                </div>
+              </div>
+              <div style="border:1px solid #d5dde8;border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:4px">{{ dimCardTitle }}</div>
+                <sc-for list="{{ dimRows }}" as="r" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:8px;min-height:22px">
+                    <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.l }}</div>
+                    <div style="{{ r.css }}">{{ r.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ hasChecks }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid #d5dde8;border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:2px">
+                  <div style="font-size:12px;font-weight:600;margin-bottom:4px">校核明细</div>
+                  <sc-for list="{{ checkRows }}" as="r" hint-placeholder-count="3">
+                    <div style="display:flex;align-items:center;gap:8px;min-height:22px">
+                      <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.l }}</div>
+                      <div style="{{ r.css }}">{{ r.v }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ hasOffsets }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid #d5dde8;border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:2px">
+                  <div style="font-size:12px;font-weight:600;margin-bottom:2px">路径偏移</div>
+                  <div style="font-size:10px;color:#8290a3;margin-bottom:4px">弯道内侧为正、外侧为负</div>
+                  <sc-for list="{{ offsetRows }}" as="r" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:8px;min-height:22px">
+                      <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.l }}</div>
+                      <div style="{{ r.css }}">{{ r.v }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div style="border:1px solid #d5dde8;border-radius:6px;padding:9px 10px;display:flex;flex-direction:column;gap:2px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:4px">四角转弯半径（几何精确值）</div>
+                <sc-for list="{{ radiusRows }}" as="r" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:8px;min-height:22px">
+                    <div style="flex:1;font-size:11.5px;color:#3d4a60">{{ r.l }}</div>
+                    <div style="{{ r.css }}">{{ r.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="border:1px solid #d5dde8;border-radius:6px;padding:9px 10px;background:#f7f9fc">
+                <div style="font-size:12px;font-weight:600;margin-bottom:4px">瓶颈</div>
+                <div style="font-size:11.5px;color:#3d4a60;line-height:1.6">{{ btlText }}</div>
+              </div>
+              <sc-if value="{{ hasWarn }}" hint-placeholder-val="{{ false }}">
+                <div style="background:#fff6dd;border:1px solid #e6c46a;border-radius:4px;padding:6px 8px;color:#9a6500;font-size:11px;line-height:1.55">{{ warnText }}</div>
+              </sc-if>
+              <div style="display:flex;justify-content:flex-end">
+                <div style="border:1px solid #b9c5d6;border-radius:8px;padding:1px 7px;color:#6e7f93;font-size:10px">离线速算 · 不写回数据</div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="width:344px;flex:none;background:#ffffff;border:1px solid #dce3ed;border-radius:8px;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:12px">
+      <div style="border:1px solid #d5dde8;border-radius:6px;position:relative;margin-top:8px;padding:16px 10px 10px">
+        <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span>显示</div>
+        <div style="display:grid;grid-template-columns:44px 1fr 1fr 1fr;gap:4px;align-items:center;font-size:12px">
+          <div style="color:#3d4a60">路径</div><div style="color:#3d4a60">中心线</div><div style="color:#3d4a60">车辆</div><div style="color:#3d4a60">越界</div>
+          <div>下发</div>
+          <div><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span></div>
+          <div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:11.5px">整车<span style="color:#6e7f93;font-size:9px">▾</span></div>
+          <div><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span></div>
+          <div>实际</div>
+          <div><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span></div>
+          <div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:11.5px">整车<span style="color:#6e7f93;font-size:9px">▾</span></div>
+          <div><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span></div>
+        </div>
+        <div style="display:flex;gap:5px;margin-top:8px">
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">仅下发</div>
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">仅实际</div>
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">全部</div>
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">适应内容</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <div style="font-size:12px">地图方向</div>
+          <div style="flex:1"></div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:4px;display:flex;align-items:center;padding:0 6px;font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:11.5px;color:#172033">0.000000 rad</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px">
+          <span style="width:13px;height:13px;border-radius:3px;border:1px solid #b9c5d6;background:#ffffff;display:inline-block"></span>显示转弯半径定位图层
+        </div>
+      </div>
+      <div style="border:1px solid #d5dde8;border-radius:6px;position:relative;padding:16px 10px 10px">
+        <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span>车道编辑</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">绘制新车道</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">按路径生成</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">删除</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">撤销</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">重做</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">保存</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">导入替换</div>
+          <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">导出</div>
+        </div>
+        <div style="height:96px;border:1px solid #d5dde8;border-radius:5px;margin-top:8px;display:flex;align-items:center;justify-content:center;color:#8290a3;font-size:11.5px;background:#ffffff">当前地图暂无车道</div>
+        <div style="display:grid;grid-template-columns:64px 1fr;gap:6px;margin-top:8px;align-items:center;font-size:12px">
+          <div style="color:#3d4a60">名称</div><div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;background:#eef1f5"></div>
+          <div style="color:#3d4a60">中心线长度</div><div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;background:#eef1f5;display:flex;align-items:center;padding:0 6px;color:#8c96a5;font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:11.5px">0.0000 m</div>
+          <div style="color:#3d4a60">总宽</div><div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;background:#eef1f5;display:flex;align-items:center;padding:0 6px;color:#8c96a5;font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:11.5px">0.0000 m</div>
+          <div style="color:#3d4a60">状态</div><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:#8c96a5"><span style="width:13px;height:13px;border-radius:3px;border:1px solid #b9c5d6;background:#eef1f5;display:inline-block"></span>参与可通行区域并集</div>
+          <div style="color:#3d4a60">形状</div><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:#8c96a5"><span style="width:13px;height:13px;border-radius:3px;border:1px solid #b9c5d6;background:#eef1f5;display:inline-block"></span>闭合环</div>
+          <div style="color:#3d4a60">默认连接</div><div style="min-height:24px;border:1px solid #b9c5d6;border-radius:4px;background:#eef1f5;display:flex;align-items:center;justify-content:space-between;padding:0 6px;font-size:11.5px;color:#8c96a5">尖角（miter）<span style="font-size:9px">▾</span></div>
+        </div>
+      </div>
+      <div style="border:1px solid #d5dde8;border-radius:6px;position:relative;padding:16px 10px 10px">
+        <div style="position:absolute;top:-9px;left:10px;background:#ffffff;padding:0 5px;font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#2474d8;color:#ffffff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1">✓</span>通行分析结果</div>
+        <div style="font-size:12px;line-height:1.6">下发路径：尚未分析</div>
+        <div style="font-size:12px;line-height:1.6">实际路径：尚未分析</div>
+        <div style="min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer;margin-top:6px" style-hover="background:#edf4ff;border-color:#4784d5">立即重新分析</div>
+        <div style="font-weight:600;font-size:12px;margin-top:10px">整弯转弯半径</div>
+        <div style="font-size:11.5px;color:#3d4a60;margin-top:3px">车辆尺寸来源：—</div>
+        <div style="font-weight:600;font-size:12px;margin-top:8px">下发路径</div>
+        <div style="display:flex;gap:5px;margin-top:5px">
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">计算转弯半径</div>
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#8c96a5;background:#eef1f5">删除选中</div>
+        </div>
+        <div style="font-size:11.5px;color:#3d4a60;margin-top:5px">下发路径：0 条</div>
+        <div style="border:1px solid #d5dde8;border-radius:5px;margin-top:5px;overflow:hidden">
+          <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;background:#eaf0f7;font-size:11px;font-weight:600">
+            <div style="padding:5px 6px;border-right:1px solid #d5dde8">测量 / 半径</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">端点 / 数值</div><div style="padding:5px 6px">状态 / 转向</div>
+          </div>
+          <div style="height:70px;display:flex;align-items:center;justify-content:center;color:#8290a3;font-size:11.5px;background:#ffffff">—</div>
+        </div>
+        <div style="font-weight:600;font-size:12px;margin-top:8px">实际路径</div>
+        <div style="display:flex;gap:5px;margin-top:5px">
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer" style-hover="background:#edf4ff;border-color:#4784d5">计算转弯半径</div>
+          <div style="flex:1;min-height:26px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#8c96a5;background:#eef1f5">删除选中</div>
+        </div>
+        <div style="font-size:11.5px;color:#3d4a60;margin-top:5px">实际路径：0 条</div>
+        <div style="border:1px solid #d5dde8;border-radius:5px;margin-top:5px;overflow:hidden">
+          <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;background:#eaf0f7;font-size:11px;font-weight:600">
+            <div style="padding:5px 6px;border-right:1px solid #d5dde8">测量 / 半径</div><div style="padding:5px 6px;border-right:1px solid #d5dde8">端点 / 数值</div><div style="padding:5px 6px">状态 / 转向</div>
+          </div>
+          <div style="height:70px;display:flex;align-items:center;justify-content:center;color:#8290a3;font-size:11.5px;background:#ffffff">—</div>
+        </div>
+      </div>
+      <div style="min-height:28px;border:1px solid #b9c5d6;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;flex:none" style-hover="background:#edf4ff;border-color:#4784d5">连接、车辆与高级设置…</div>
+    </div>
+  </div>
+  <div style="height:26px;flex:none;background:#eaf0f7;border-top:1px solid #d5dde8;display:flex;align-items:center;padding:0 8px;gap:14px;font-size:11.5px;color:#3d4a60">
+    <div style="flex:1">{{ statusText }}</div>
+    <div style="font-family:Consolas,'DejaVu Sans Mono',monospace">原始坐标  X —   Y —</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;defaultScenario&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;corner&quot;, &quot;options&quot;: [&quot;corner&quot;, &quot;crossback&quot;, &quot;stubback&quot;, &quot;uturn&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;行为&quot;},
+  &quot;samplingQuality&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;标准&quot;, &quot;options&quot;: [&quot;标准&quot;, &quot;精细&quot;], &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;行为&quot;},
+  &quot;showGearLabels&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;图示&quot;}
+}">
+class Component extends DCLogic {
+  state = {
+    tab: 'calc', mode: 'fwd', type: 'corner', bidir: false, gear: 'D', extreme: false,
+    vR: '1.60', vW: '1.23', vLf: '1.545', vLr: '2.223', vC: '0.05',
+    rWA: '3.00', rWB: '3.00', rWV: '3.00', rWH: '3.50', rLS: '4.00', rW: '3.00', rB: '1.00', rD: '4.50',
+    layers: { env: true, dims: true, grid: true },
+    res: null, busy: true,
+  };
+
+  componentDidMount() {
+    const d = this.props.defaultScenario;
+    if (d && ['crossback', 'stubback', 'uturn'].includes(d)) this.setState({ type: d }, () => this._kick(0));
+    else this._kick(0);
+  }
+  componentWillUnmount() { clearTimeout(this._t); }
+
+  _kick(delay) {
+    if (!this.state.busy) this.setState({ busy: true });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => {
+      let res;
+      try { res = this._compute(); } catch (err) { res = { error: String((err && err.message) || err) }; }
+      this.setState({ res, busy: false });
+    }, delay === 0 ? 30 : 160);
+  }
+
+  _num(s, d) { const v = parseFloat(String(s).replace('−', '-')); return isFinite(v) ? v : d; }
+
+  _compute() {
+    const st = this.state, num = this._num;
+    const R = Math.max(0.2, num(st.vR, 1.6)), W = Math.max(0.3, num(st.vW, 1.23));
+    const Lf = Math.max(0.05, num(st.vLf, 1.545)), Lr = Math.max(0.05, num(st.vLr, 2.223));
+    const c = Math.max(0, num(st.vC, 0.05));
+    const hw = W / 2;
+    const type = st.type, bidir = st.bidir, extreme = st.extreme, mode = st.mode;
+    const gear = (type === 'crossback' || type === 'stubback') ? 'D' : st.gear;
+    const fineArc = this.props.samplingQuality === '精细' ? 0.015 : 0.03, fineLin = 0.06;
+    const coarseArc = 0.09, coarseLin = 0.18;
+    const Rbo = Math.sqrt((R + hw) ** 2 + Lr ** 2), Rfo = Math.sqrt((R + hw) ** 2 + Lf ** 2);
+    const Rbi = Math.sqrt((R - hw) ** 2 + Lr ** 2), Rfi = Math.sqrt((R - hw) ** 2 + Lf ** 2);
+
+    // ---------- geometry primitives ----------
+    const pip = (px, py, poly) => {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    };
+    const dPS = (px, py, ax, ay, bx, by) => {
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      let t = L2 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = ax + t * dx, qy = ay + t * dy;
+      return { d: Math.hypot(px - qx, py - qy), qx, qy };
+    };
+    const ori = (ax, ay, bx, by, cx, cy) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const cross = (ax, ay, bx, by, cx, cy, dx, dy) => {
+      const o1 = ori(ax, ay, bx, by, cx, cy), o2 = ori(ax, ay, bx, by, dx, dy);
+      const o3 = ori(cx, cy, dx, dy, ax, ay), o4 = ori(cx, cy, dx, dy, bx, by);
+      return o1 * o2 < 0 && o3 * o4 < 0;
+    };
+    const segSeg = (ax, ay, bx, by, cx, cy, dx, dy) => {
+      if (cross(ax, ay, bx, by, cx, cy, dx, dy)) return { d: 0, px: (ax + bx) / 2, py: (ay + by) / 2, qx: (cx + dx) / 2, qy: (cy + dy) / 2 };
+      let best = null, t;
+      t = dPS(ax, ay, cx, cy, dx, dy); best = { d: t.d, px: ax, py: ay, qx: t.qx, qy: t.qy };
+      t = dPS(bx, by, cx, cy, dx, dy); if (t.d < best.d) best = { d: t.d, px: bx, py: by, qx: t.qx, qy: t.qy };
+      t = dPS(cx, cy, ax, ay, bx, by); if (t.d < best.d) best = { d: t.d, px: t.qx, py: t.qy, qx: cx, qy: cy };
+      t = dPS(dx, dy, ax, ay, bx, by); if (t.d < best.d) best = { d: t.d, px: t.qx, py: t.qy, qx: dx, qy: dy };
+      return best;
+    };
+    const toEdges = poly => poly.map((v, i) => [v[0], v[1], poly[(i + 1) % poly.length][0], poly[(i + 1) % poly.length][1]]);
+    const inRect = (v, cs) => {
+      let sgn = 0;
+      for (let i = 0; i < 4; i++) {
+        const a = cs[i], b = cs[(i + 1) % 4];
+        const o = ori(a[0], a[1], b[0], b[1], v[0], v[1]);
+        if (Math.abs(o) < 1e-12) continue;
+        if (sgn === 0) sgn = Math.sign(o); else if (Math.sign(o) !== sgn) return false;
+      }
+      return true;
+    };
+    const poseClear = (p, poly, edges) => {
+      const nx = -p.uy, ny = p.ux;
+      const fx = p.x + p.ld * p.ux, fy = p.y + p.ld * p.uy, rx = p.x - p.tr * p.ux, ry = p.y - p.tr * p.uy;
+      const cs = [[fx + hw * nx, fy + hw * ny], [fx - hw * nx, fy - hw * ny], [rx - hw * nx, ry - hw * ny], [rx + hw * nx, ry + hw * ny]];
+      let allIn = true;
+      for (const cn of cs) if (!pip(cn[0], cn[1], poly)) { allIn = false; break; }
+      let best = Infinity, bp = null, wp = null;
+      for (let i = 0; i < 4 && best > 0; i++) {
+        const a = cs[i], b = cs[(i + 1) % 4];
+        for (const e of edges) {
+          const r = segSeg(a[0], a[1], b[0], b[1], e[0], e[1], e[2], e[3]);
+          if (r.d < best) { best = r.d; bp = [r.px, r.py]; wp = [r.qx, r.qy]; if (best === 0) break; }
+        }
+      }
+      if (allIn && best > 1e-9) return { clear: best, bp, wp, cs };
+      let pen = 0;
+      for (const cn of cs) {
+        if (!pip(cn[0], cn[1], poly)) {
+          let d = Infinity;
+          for (const e of edges) { const t = dPS(cn[0], cn[1], e[0], e[1], e[2], e[3]); if (t.d < d) d = t.d; }
+          if (d > pen) { pen = d; bp = [cn[0], cn[1]]; wp = bp; }
+        }
+      }
+      if (pen === 0) {
+        for (const v of poly) {
+          if (inRect(v, cs)) {
+            let d = Infinity;
+            for (let k = 0; k < 4; k++) { const a = cs[k], b = cs[(k + 1) % 4]; const t = dPS(v[0], v[1], a[0], a[1], b[0], b[1]); if (t.d < d) d = t.d; }
+            if (d > pen) { pen = d; wp = [v[0], v[1]]; bp = wp; }
+          }
+        }
+        pen = pen || 1e-3;
+      }
+      return { clear: -pen, bp, wp, cs };
+    };
+    const mkPoses = (prims, arcStep, linStep) => {
+      const out = [];
+      for (const pr of prims) {
+        const ld = pr.g === 'D' ? Lf : Lr, tr = pr.g === 'D' ? Lr : Lf;
+        if (pr.t === 'L') {
+          const dx = pr.b[0] - pr.a[0], dy = pr.b[1] - pr.a[1], len = Math.hypot(dx, dy);
+          if (len < 1e-6) continue;
+          const ux = dx / len, uy = dy / len, n = Math.max(2, Math.ceil(len / linStep));
+          for (let i = 0; i <= n; i++) { const t = i / n; out.push({ x: pr.a[0] + dx * t, y: pr.a[1] + dy * t, ux, uy, ld, tr, g: pr.g }); }
+        } else {
+          const span = pr.a1 - pr.a0, n = Math.max(6, Math.ceil(Math.abs(span) / arcStep)), s = span >= 0 ? 1 : -1;
+          for (let i = 0; i <= n; i++) {
+            const az = pr.a0 + span * (i / n), ca = Math.cos(az), sa = Math.sin(az);
+            out.push({ x: pr.c[0] + pr.r * ca, y: pr.c[1] + pr.r * sa, ux: -sa * s, uy: ca * s, ld, tr, g: pr.g, cx: pr.c[0], cy: pr.c[1] });
+          }
+        }
+      }
+      return out;
+    };
+    const mirror = prims => prims.map(pr => pr.t === 'L'
+      ? { t: 'L', a: [-pr.a[0], pr.a[1]], b: [-pr.b[0], pr.b[1]], g: pr.g }
+      : { t: 'A', c: [-pr.c[0], pr.c[1]], r: pr.r, a0: Math.PI - pr.a0, a1: Math.PI - pr.a1, g: pr.g });
+
+    // ---------- scenario builders ----------
+    const PI = Math.PI;
+    const mk = (dims, off) => {
+      if (type === 'corner') {
+        const wA = dims.wA, wB = dims.wB, eA = off.eA || 0, eB = bidir ? 0 : (off.eB || 0);
+        const LA = wB / 2 + R + Lf + Lr + 1.1, LB = wA / 2 + R + Lf + Lr + 1.1;
+        const poly = bidir
+          ? [[-LA, -wA / 2], [LA, -wA / 2], [LA, wA / 2], [wB / 2, wA / 2], [wB / 2, LB], [-wB / 2, LB], [-wB / 2, wA / 2], [-LA, wA / 2]]
+          : [[-LA, -wA / 2], [wB / 2, -wA / 2], [wB / 2, LB], [-wB / 2, LB], [-wB / 2, wA / 2], [-LA, wA / 2]];
+        const ay = eA, bx = -eB;
+        const tr0 = gear === 'D' ? Lr : Lf, ld0 = gear === 'D' ? Lf : Lr;
+        const prims = [
+          { t: 'L', a: [-LA + tr0 + 0.15, ay], b: [bx - R, ay], g: gear },
+          { t: 'A', c: [bx - R, ay + R], r: R, a0: -PI / 2, a1: 0, g: gear },
+          { t: 'L', a: [bx, ay + R], b: [bx, LB - ld0 - 0.15], g: gear },
+        ];
+        const mans = [{ prims, label: bidir ? '西侧进入' : '转弯段' }];
+        if (bidir) mans.push({ prims: mirror(prims), label: '东侧进入' });
+        const centers = bidir
+          ? [[[-LA, 0], [LA, 0]], [[0, -wA / 2], [0, LB]]]
+          : [[[-LA, 0], [wB / 2, 0]], [[0, -wA / 2], [0, LB]]];
+        return { poly, mans, centers, LA, LB };
+      }
+      if (type === 'crossback') {
+        const wV = dims.wV, wH = dims.wH, LS = dims.LS, eV = bidir ? 0 : (off.eV || 0), eH = off.eH || 0;
+        const LN = wH / 2 + Lf + Lr + 0.9, LW = wV / 2 + R + Lf + Lr + 1.1;
+        const poly = bidir
+          ? [[-LW, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2], [LW, -wH / 2], [LW, wH / 2], [wV / 2, wH / 2], [wV / 2, LN], [-wV / 2, LN], [-wV / 2, wH / 2], [-LW, wH / 2]]
+          : [[-LW, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2 - LS], [wV / 2, LN], [-wV / 2, LN], [-wV / 2, wH / 2], [-LW, wH / 2]];
+        const sx = -eV, ey = -eH, y0 = ey - R;
+        const prims = [
+          { t: 'L', a: [sx, LN - Lf - 0.15], b: [sx, y0], g: 'R' },
+          { t: 'A', c: [sx - R, y0], r: R, a0: 0, a1: PI / 2, g: 'D' },
+          { t: 'L', a: [sx - R, ey], b: [-LW + Lf + 0.15, ey], g: 'D' },
+        ];
+        const mans = [{ prims, label: '向西转出' }];
+        if (bidir) mans.push({ prims: mirror(prims), label: '向东转出' });
+        const centers = [[[0, -wH / 2 - LS], [0, LN]], bidir ? [[-LW, 0], [LW, 0]] : [[-LW, 0], [wV / 2, 0]]];
+        return { poly, mans, centers, LW, LN };
+      }
+      if (type === 'stubback') {
+        const wH = dims.wH, wV = dims.wV, LS = dims.LS, a = off.a || 0, so = bidir ? 0 : (off.so || 0);
+        const ry = -a, sxx = -so;
+        const LX = Math.abs(sxx) + R + Lf + Lr + 1.2;
+        const poly = [[-LX, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2], [LX, -wH / 2], [LX, wH / 2], [-LX, wH / 2]];
+        const reach = Lf + Lr + 0.8;
+        const prims = [
+          { t: 'L', a: [sxx - R - reach, ry], b: [sxx + R, ry], g: 'D' },
+          { t: 'A', c: [sxx + R, ry - R], r: R, a0: PI / 2, a1: PI, g: 'R' },
+          { t: 'A', c: [sxx - R, ry - R], r: R, a0: 0, a1: PI / 2, g: 'D' },
+          { t: 'L', a: [sxx - R, ry], b: [sxx - R - reach, ry], g: 'D' },
+        ];
+        const mans = [{ prims, label: '自西进入' }];
+        if (bidir) mans.push({ prims: mirror(prims), label: '自东进入' });
+        const centers = [[[-LX, 0], [LX, 0]], [[0, -wH / 2 - LS], [0, wH / 2]]];
+        return { poly, mans, centers, LX };
+      }
+      // uturn
+      const w = dims.w, b = dims.b, D = dims.D, yc = off.yc || 0;
+      const g = gear;
+      const ld0 = g === 'D' ? Lf : Lr, tr0 = g === 'D' ? Lr : Lf;
+      const LD = Lf + Lr + 2.4;
+      if (!bidir) {
+        const e1 = off.e1 || 0, e2 = off.e2 || 0, s = w + b;
+        const xL = -s / 2 + e1, xR = s / 2 - e2, sep = xR - xL, rs = sep / 2;
+        const OW = s / 2 + w / 2;
+        const poly = [[-OW, -LD], [-b / 2, -LD], [-b / 2, 0], [b / 2, 0], [b / 2, -LD], [OW, -LD], [OW, D], [-OW, D]];
+        if (rs < R - 1e-9) return { poly, bad: R - rs, rs, centers: [] };
+        const prims = [
+          { t: 'L', a: [xL, -LD + tr0 + 0.15], b: [xL, yc], g },
+          { t: 'A', c: [(xL + xR) / 2, yc], r: rs, a0: PI, a1: 0, g },
+          { t: 'L', a: [xR, yc], b: [xR, -LD + ld0 + 0.15], g },
+        ];
+        const centers = [[[-s / 2, -LD], [-s / 2, 0.4]], [[s / 2, -LD], [s / 2, 0.4]]];
+        return { poly, mans: [{ prims, label: '掉头' }], centers, rs, LD, OW };
+      }
+      const eo = off.eo || 0, s = w + b;
+      const xL = -s + eo, xR = 0, sep = xR - xL, rs = sep / 2;
+      const OW = 1.5 * w + b;
+      const poly = [[-OW, -LD], [-w / 2 - b, -LD], [-w / 2 - b, 0], [-w / 2, 0], [-w / 2, -LD], [w / 2, -LD], [w / 2, 0], [w / 2 + b, 0], [w / 2 + b, -LD], [OW, -LD], [OW, D], [-OW, D]];
+      if (rs < R - 1e-9) return { poly, bad: R - rs, rs, centers: [] };
+      const prims = [
+        { t: 'L', a: [xL, -LD + tr0 + 0.15], b: [xL, yc], g },
+        { t: 'A', c: [(xL + xR) / 2, yc], r: rs, a0: PI, a1: 0, g },
+        { t: 'L', a: [xR, yc], b: [xR, -LD + ld0 + 0.15], g },
+      ];
+      const centers = [[[-s, -LD], [-s, 0.4]], [[0, -LD], [0, 0.4]], [[s, -LD], [s, 0.4]]];
+      return { poly, mans: [{ prims, label: '左侧掉头' }, { prims: mirror(prims), label: '右侧掉头' }], centers, rs, LD, OW };
+    };
+
+    const evalCfg = (dims, off, arcStep, linStep, wantMeta) => {
+      const B = mk(dims, off);
+      if (B.bad) return { clear: -0.5 - B.bad, B };
+      const edges = toEdges(B.poly);
+      let min = Infinity, meta = null;
+      for (const man of B.mans) {
+        const ps = mkPoses(man.prims, arcStep, linStep);
+        for (const p of ps) {
+          const r = poseClear(p, B.poly, edges);
+          if (r.clear < min) { min = r.clear; if (wantMeta) meta = { p, r, label: man.label }; }
+        }
+      }
+      return { clear: min, meta, B };
+    };
+
+    // ---------- offsets ----------
+    const zeroOff = () => ({ eA: 0, eB: 0, eV: 0, eH: 0, a: 0, so: 0, e1: 0, e2: 0, eo: 0, yc: type === 'uturn' ? 0.25 : 0 });
+    const offSpecs = dims => {
+      const m = wid => Math.max(0, wid / 2 - hw - c - 0.004);
+      const sp = [];
+      if (type === 'uturn') sp.push({ k: 'yc', lo: -1.4, hi: Math.max(0.4, dims.D - 0.15) });
+      if (!extreme) return sp;
+      if (type === 'corner') { sp.push({ k: 'eA', lo: -m(dims.wA), hi: m(dims.wA) }); if (!bidir) sp.push({ k: 'eB', lo: -m(dims.wB), hi: m(dims.wB) }); }
+      if (type === 'crossback') { if (!bidir) sp.push({ k: 'eV', lo: -m(dims.wV), hi: m(dims.wV) }); sp.push({ k: 'eH', lo: -m(dims.wH), hi: m(dims.wH) }); }
+      if (type === 'stubback') { sp.push({ k: 'a', lo: -m(dims.wH), hi: m(dims.wH) }); if (!bidir) sp.push({ k: 'so', lo: -m(dims.wV), hi: m(dims.wV) }); }
+      if (type === 'uturn') {
+        if (!bidir) { sp.push({ k: 'e1', lo: -m(dims.w), hi: m(dims.w) }); sp.push({ k: 'e2', lo: -m(dims.w), hi: m(dims.w) }); }
+        else sp.push({ k: 'eo', lo: -m(dims.w), hi: m(dims.w) });
+      }
+      return sp;
+    };
+    const optimize = (dims, cheap, arcStep, linStep) => {
+      const specs = offSpecs(dims), off = zeroOff();
+      if (!specs.length) return { off, val: evalCfg(dims, off, arcStep, linStep).clear };
+      const brk = specs.map(s => [s.lo, s.hi]);
+      let bestVal = evalCfg(dims, off, arcStep, linStep).clear;
+      const rounds = cheap ? 2 : 3, samples = cheap ? 5 : 9;
+      for (let r = 0; r < rounds; r++) {
+        specs.forEach((s, i) => {
+          const [lo, hi] = brk[i];
+          let bv = off[s.k];
+          for (let j = 0; j <= samples; j++) {
+            const v = lo + (hi - lo) * j / samples;
+            off[s.k] = v;
+            const val = evalCfg(dims, off, arcStep, linStep).clear;
+            if (val > bestVal + 1e-6) { bestVal = val; bv = v; }
+          }
+          off[s.k] = bv;
+          const half = (hi - lo) * 0.28;
+          brk[i] = [Math.max(s.lo, bv - half), Math.min(s.hi, bv + half)];
+        });
+      }
+      return { off, val: bestVal };
+    };
+    const feasible = dims => {
+      if (extreme || type === 'uturn') return optimize(dims, true, coarseArc, coarseLin).val >= c - 4e-4;
+      return evalCfg(dims, zeroOff(), coarseArc, coarseLin).clear >= c - 4e-4;
+    };
+
+    // ---------- forward solve ----------
+    const bGiven = Math.max(0.05, num(st.rB, 1.0));
+    let dims, infeasible = false;
+    const solvedKeys = { corner: ['wA', 'wB'], crossback: ['wV', 'wH', 'LS'], stubback: ['wH', 'wV', 'LS'], uturn: ['w', 'D'] }[type];
+    if (mode === 'fwd') {
+      const hiW = W + 2 * c + 2 * Math.max(Rbo - R, R) + 2.4;
+      const brks = {
+        wA: [W + 2 * c + 0.005, hiW], wB: [W + 2 * c + 0.005, hiW], wV: [W + 2 * c + 0.005, hiW], wH: [W + 2 * c + 0.005, hiW],
+        LS: [0.02, R + Lr + c + 1.8],
+        w: [Math.max(W + 2 * c + 0.005, 2 * R - bGiven + 0.01), hiW + 2 * R], D: [0.25, R + w0() + Lr + c + 3],
+      };
+      function w0() { return Math.max(W + 2 * c, 2 * R - bGiven) + 1; }
+      dims = { wA: hiW, wB: hiW, wV: hiW, wH: hiW, LS: brks.LS[1], w: brks.w[1], D: brks.D[1], b: bGiven };
+      if (!feasible(dims)) infeasible = true;
+      else {
+        for (let round = 0; round < 3; round++) {
+          for (const k of solvedKeys) {
+            let [lo, hi] = brks[k];
+            const save = dims[k];
+            dims[k] = lo;
+            if (feasible(dims)) { continue; }
+            dims[k] = save;
+            let a = lo, bb = Math.max(hi, dims[k]);
+            for (let i = 0; i < 13; i++) {
+              const mid = (a + bb) / 2;
+              dims[k] = mid;
+              if (feasible(dims)) bb = mid; else a = mid;
+            }
+            dims[k] = bb;
+          }
+        }
+        for (let guard = 0; guard < 3; guard++) {
+          const chk = extreme || type === 'uturn'
+            ? optimize(dims, false, fineArc, fineLin).val
+            : evalCfg(dims, zeroOff(), fineArc, fineLin).clear;
+          if (chk >= c - 1e-3) break;
+          const bump = (c - chk) + 0.006;
+          for (const k of solvedKeys) dims[k] += bump;
+        }
+      }
+    } else {
+      dims = {
+        wA: Math.max(0.2, num(st.rWA, 3)), wB: Math.max(0.2, num(st.rWB, 3)),
+        wV: Math.max(0.2, num(st.rWV, 3)), wH: Math.max(0.2, num(st.rWH, 3.5)),
+        LS: Math.max(0, num(st.rLS, 4)), w: Math.max(0.2, num(st.rW, 3)), b: bGiven, D: Math.max(0, num(st.rD, 4.5)),
+      };
+    }
+
+    // ---------- final evaluation ----------
+    let off = zeroOff(), optVal = null;
+    if (!infeasible && (extreme || type === 'uturn')) {
+      const o = optimize(dims, false, mode === 'fwd' ? coarseArc : fineArc, mode === 'fwd' ? coarseLin : fineLin);
+      off = o.off; optVal = o.val;
+    }
+    const fin = infeasible ? null : evalCfg(dims, off, fineArc, fineLin, true);
+    const minClear = fin ? fin.clear : -1;
+    let zeroClear = null;
+    if (mode === 'chk' && extreme) {
+      const zo = zeroOff();
+      let zc;
+      if (type === 'uturn') {
+        // yc-only optimization for the centered comparison
+        const specsBak = offSpecs(dims).filter(s => s.k === 'yc');
+        let best = -Infinity;
+        for (let j = 0; j <= 10; j++) {
+          const v = specsBak.length ? specsBak[0].lo + (specsBak[0].hi - specsBak[0].lo) * j / 10 : 0;
+          zo.yc = v;
+          const val = evalCfg(dims, zo, fineArc, fineLin).clear;
+          if (val > best) best = val;
+        }
+        zc = best;
+      } else zc = evalCfg(dims, zo, fineArc, fineLin).clear;
+      zeroClear = zc;
+    }
+
+    // feasible ranges per lateral offset (chk + extreme)
+    const ranges = [];
+    if (mode === 'chk' && extreme && !infeasible) {
+      for (const s of offSpecs(dims)) {
+        if (s.k === 'yc') continue;
+        const save = off[s.k];
+        let lo = null, hi = null;
+        for (let j = 0; j <= 14; j++) {
+          const v = s.lo + (s.hi - s.lo) * j / 14;
+          off[s.k] = v;
+          const ok = evalCfg(dims, off, coarseArc, coarseLin).clear >= c - 4e-4;
+          if (ok) { if (lo === null) lo = v; hi = v; }
+        }
+        off[s.k] = save;
+        ranges.push({ k: s.k, lo, hi });
+      }
+    }
+
+    // ---------- drawing ----------
+    const B = fin ? fin.B : mk(dims, off);
+    const F = y => -y;
+    const pt = p => `${p[0].toFixed(3)} ${F(p[1]).toFixed(3)}`;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const v of B.poly) { minX = Math.min(minX, v[0]); maxX = Math.max(maxX, v[0]); minY = Math.min(minY, v[1]); maxY = Math.max(maxY, v[1]); }
+    const mg = 1.05;
+    const vb = `${(minX - mg).toFixed(2)} ${(-(maxY + mg)).toFixed(2)} ${(maxX - minX + 2 * mg).toFixed(2)} ${(maxY - minY + 2 * mg).toFixed(2)}`;
+    const sceneW = maxX - minX + 2 * mg;
+    const fs = Math.max(0.17, sceneW / 54);
+    let gridD = '';
+    for (let x = Math.ceil((minX - mg) / 0.5) * 0.5; x <= maxX + mg; x += 0.5) gridD += `M${x.toFixed(2)} ${(-(maxY + mg)).toFixed(2)} V${(-(minY - mg)).toFixed(2)} `;
+    for (let y = Math.ceil((minY - mg) / 0.5) * 0.5; y <= maxY + mg; y += 0.5) gridD += `M${(minX - mg).toFixed(2)} ${(-y).toFixed(2)} H${(maxX + mg).toFixed(2)} `;
+    const regionD = 'M' + B.poly.map(pt).join(' L ') + ' Z';
+    const centerD = (B.centers || []).map(s => `M${pt(s[0])} L ${pt(s[1])}`).join(' ');
+    let envD = '', vioD = '', pathDD = '', pathRD = '';
+    const pills = [];
+    if (B.mans) {
+      const edges = toEdges(B.poly);
+      for (const man of B.mans) {
+        const ps = mkPoses(man.prims, fineArc, fineLin);
+        const stride = Math.max(1, Math.ceil(ps.length / 52));
+        let vioCount = 0;
+        ps.forEach((p, i) => {
+          const r = poseClear(p, B.poly, edges);
+          if (i % stride === 0 || i === ps.length - 1) envD += 'M' + r.cs.map(cn => pt(cn)).join(' L ') + ' Z ';
+          if (r.clear < -1e-6 && vioCount < 16 && i % Math.max(1, Math.ceil(stride / 2)) === 0) { vioD += 'M' + r.cs.map(cn => pt(cn)).join(' L ') + ' Z '; vioCount++; }
+        });
+        let cur = null;
+        for (const p of ps) {
+          const P = `${p.x.toFixed(3)} ${(-p.y).toFixed(3)}`;
+          if (cur !== p.g) { if (p.g === 'D') pathDD += `M${P} `; else pathRD += `M${P} `; cur = p.g; }
+          else { if (p.g === 'D') pathDD += `L${P} `; else pathRD += `L${P} `; }
+        }
+      }
+      const m0 = B.mans[0];
+      for (const pr of m0.prims) {
+        if (pr.t === 'L') {
+          const mx = (pr.a[0] + pr.b[0]) / 2, my = (pr.a[1] + pr.b[1]) / 2;
+          const vert = Math.abs(pr.b[0] - pr.a[0]) < 1e-6;
+          pills.push({ x: mx + (vert ? fs * 1.5 : 0), y: my + (vert ? 0 : fs * 1.3), t: pr.g + '档' });
+        } else {
+          const azm = (pr.a0 + pr.a1) / 2;
+          pills.push({ x: pr.c[0] + (pr.r + fs * 1.6) * Math.cos(azm), y: pr.c[1] + (pr.r + fs * 1.6) * Math.sin(azm), t: pr.g + '档' });
+        }
+      }
+    }
+
+    // annotation data
+    const annos = [];
+    const dimA = (a, b, label, solved, tx, ty) => annos.push({ t: 'dim', a, b, label, solved, tx: tx || 0, ty: ty || 0 });
+    const sv = mode === 'fwd';
+    if (type === 'corner') {
+      const LA = B.LA, LB = B.LB, wA = dims.wA, wB = dims.wB;
+      dimA([-LA + 0.55, -wA / 2], [-LA + 0.55, wA / 2], `${bidir ? '主路宽' : '进入道宽'} ${dims.wA.toFixed(2)}`, sv, -0, fs * 1.2);
+      dimA([-wB / 2, LB - 0.5], [wB / 2, LB - 0.5], `${bidir ? '支路宽' : '驶出道宽'} ${dims.wB.toFixed(2)}`, sv, 0, -fs * 0.9);
+    }
+    if (type === 'crossback') {
+      const LW = B.LW, LN = B.LN;
+      dimA([-dims.wV / 2, LN - 0.45], [dims.wV / 2, LN - 0.45], `倒车道宽 ${dims.wV.toFixed(2)}`, sv, 0, -fs * 0.9);
+      dimA([-LW + 0.5, -dims.wH / 2], [-LW + 0.5, dims.wH / 2], `转出道宽 ${dims.wH.toFixed(2)}`, sv, 0, fs * 1.2);
+      dimA([dims.wV / 2 + 0.45, -dims.wH / 2], [dims.wV / 2 + 0.45, -dims.wH / 2 - dims.LS], `下探长 ${dims.LS.toFixed(2)}`, sv, fs * 3.2, 0);
+    }
+    if (type === 'stubback') {
+      const LX = B.LX;
+      dimA([LX - 0.5, -dims.wH / 2], [LX - 0.5, dims.wH / 2], `主路宽 ${dims.wH.toFixed(2)}`, sv, -fs * 3.0, 0);
+      dimA([-dims.wV / 2, -dims.wH / 2 - dims.LS + 0.4], [dims.wV / 2, -dims.wH / 2 - dims.LS + 0.4], `支路宽 ${dims.wV.toFixed(2)}`, sv, 0, -fs * 0.9);
+      dimA([dims.wV / 2 + 0.45, -dims.wH / 2], [dims.wV / 2 + 0.45, -dims.wH / 2 - dims.LS], `支路深 ${dims.LS.toFixed(2)}`, sv, fs * 3.0, 0);
+    }
+    if (type === 'uturn') {
+      const OW = B.OW, LD = B.LD;
+      dimA([-OW, -LD + 0.5], [-OW + dims.w, -LD + 0.5], `巷道宽 ${dims.w.toFixed(2)}`, sv, 0, fs * 1.2);
+      dimA([bidir ? -dims.w / 2 - dims.b : -dims.b / 2, -LD + 0.5], [bidir ? -dims.w / 2 : dims.b / 2, -LD + 0.5], `隔墙 ${dims.b.toFixed(2)}`, false, 0, fs * 1.2);
+      dimA([OW + 0.45, 0], [OW + 0.45, dims.D], `端头深 ${dims.D.toFixed(2)}`, sv, fs * 3.0, 0);
+      if (B.rs) annos.push({ t: 'yc', y: off.yc, x0: bidir ? -(dims.w + dims.b) : -(dims.w + dims.b) / 2, label: `起弯点 ${off.yc >= 0 ? '+' : '−'}${Math.abs(off.yc).toFixed(2)}` });
+    }
+    if (fin && fin.meta && fin.meta.r.bp) {
+      annos.push({ t: 'btl', bp: fin.meta.r.bp, wp: fin.meta.r.wp, label: `最小净距 ${minClear.toFixed(2)} m` });
+    }
+
+    // bottleneck naming
+    let btlText = '—';
+    if (infeasible) btlText = '在给定参数下未找到可行的极限尺寸（检查转弯半径与车宽）。';
+    else if (fin && fin.meta) {
+      const m = fin.meta, p = m.p, r = m.r;
+      let bi = 0, bd = Infinity;
+      r.cs.forEach((cn, i) => { const d = Math.hypot(cn[0] - r.bp[0], cn[1] - r.bp[1]); if (d < bd) { bd = d; bi = i; } });
+      const leadIsFront = p.g === 'D';
+      const isLead = bi === 0 || bi === 1;
+      const fr = (isLead === leadIsFront) ? '前' : '后';
+      let io = '角';
+      if (p.cx !== undefined) {
+        const dc = Math.hypot(r.bp[0] - p.cx, r.bp[1] - p.cy), dp = Math.hypot(p.x - p.cx, p.y - p.cy);
+        io = (dc > dp ? '外' : '内') + '角';
+      } else io = '部/侧边';
+      const seg = p.cx !== undefined ? `${p.g}档转弯段` : `${p.g}档直行段`;
+      btlText = `最紧点为${fr}${io}扫掠（${m.label} · ${seg}）。最小净距 ${minClear.toFixed(2)} m，出现在图中红点处。${bd > 0.4 ? '' : ''}`;
+    }
+
+    return {
+      veh: { R, W, Lf, Lr, c }, type, bidir, gear, extreme, mode,
+      dims, off, minClear, zeroClear, optVal, infeasible, ranges, solvedKeys,
+      radii: { fo: Rfo, bo: Rbo, fi: Rfi, bi: Rbi },
+      rs: B.rs || null,
+      svg: { vb, gridD, regionD, centerD, envD, vioD, pathDD, pathRD, fs, pills, annos },
+      btlText,
+    };
+  }
+
+  // ---------- UI ----------
+  renderVals() {
+    const st = this.state, res = st.res;
+    const mono = "font-family:Consolas,'DejaVu Sans Mono',monospace;";
+    const segBase = 'flex:1;min-height:24px;display:flex;align-items:center;justify-content:center;font-size:11.5px;cursor:pointer;';
+    const segOn = segBase + 'background:#dbeaff;color:#14395f;font-weight:600;';
+    const segOff = segBase + 'background:#ffffff;color:#3d4a60;';
+    const seg = (k, opts, cur) => opts.map((o, i) => ({
+      k, v: o.v, label: o.label,
+      css: (String(cur) === String(o.v) ? segOn : segOff) + (i ? 'border-left:1px solid #b9c5d6;' : ''),
+    }));
+    const onSeg = e => {
+      const k = e.currentTarget.dataset.k; let v = e.currentTarget.dataset.v;
+      if (k === 'bidir' || k === 'extreme') v = v === '1';
+      this.setState({ [k]: v }, () => this._kick());
+    };
+    const onNum = e => { this.setState({ [e.target.dataset.key]: e.target.value }, () => this._kick()); };
+    const onSpin = e => {
+      const ds = e.currentTarget.dataset, k = ds.key;
+      const cur = this._num(this.state[k], 0);
+      const v = Math.max(0, cur + parseFloat(ds.step));
+      this.setState({ [k]: v.toFixed(parseInt(ds.dec)) }, () => this._kick());
+    };
+    const onLayer = e => {
+      const k = e.currentTarget.dataset.k;
+      this.setState({ layers: { ...st.layers, [k]: !st.layers[k] } });
+    };
+    const onTab = e => this.setState({ tab: e.currentTarget.dataset.tab });
+
+    const tabOn = 'background:#ffffff;font-weight:600;border-bottom-color:#ffffff;color:#172033;';
+    const tabOff = 'background:#eef2f8;color:#3d4a60;border-bottom-color:#d5dde8;';
+    const tileBase = 'display:flex;gap:7px;align-items:center;padding:7px 8px;border-radius:5px;cursor:pointer;';
+    const tiles = [
+      { v: 'corner', label: '直角转弯', sub: '90° 弯 · D/R', icon: 'M3 23 V10 Q3 3 10 3 H23 M11 23 V16 Q11 11 16 11 H23' },
+      { v: 'crossback', label: 'R档直行转D', sub: '倒车穿越再转出', icon: 'M10 3 V10 H3 M3 16 H10 V23 M16 23 V16 H23 M23 10 H16 V3 M13 5 V14 M13 14 Q13 17 10 17 H6' },
+      { v: 'stubback', label: 'R档转弯转D', sub: '倒入支路再驶出', icon: 'M3 8 H23 M3 16 H10 V23 M16 23 V16 H23 M6 12 H12 Q13 12 13 13 V20' },
+      { v: 'uturn', label: 'U型转弯', sub: '端头掉头 · D/R', icon: 'M3 23 V4 H23 V23 M8 23 V12 A5 5 0 0 1 18 12 V23 M13 23 V16' },
+    ].map(t => ({
+      ...t,
+      css: tileBase + (st.type === t.v ? 'background:#dbeaff;border:1px solid #4784d5;color:#14395f;' : 'background:#ffffff;border:1px solid #d5dde8;color:#3d4a60;'),
+    }));
+
+    const gearFixed = st.type === 'crossback' || st.type === 'stubback';
+    const fwd = st.mode === 'fwd';
+    const f2 = v => (v == null || !isFinite(v)) ? '—' : v.toFixed(2);
+    const fm = v => (v == null || !isFinite(v)) ? '—' : v.toFixed(2) + ' m';
+    const sgn = v => (v < -1e-9 ? '−' : '+') + Math.abs(v).toFixed(2) + ' m';
+    const valCss = (color, bold) => `${mono}font-size:12px;font-weight:${bold ? 700 : 600};color:${color};white-space:nowrap;`;
+
+    const vehRows = [
+      { key: 'vR', label: '转弯半径 R（前轴中心）', step: 0.05, dec: 2 },
+      { key: 'vW', label: '车宽 W', step: 0.01, dec: 2 },
+      { key: 'vLf', label: '中心前距 Lf', step: 0.005, dec: 3 },
+      { key: 'vLr', label: '中心后距 Lr', step: 0.005, dec: 3 },
+      { key: 'vC', label: '净距阈值', step: 0.01, dec: 2 },
+    ].map(r => ({ ...r, negStep: -r.step, val: st[r.key] }));
+
+    const roadDefs = {
+      corner: [{ key: 'rWA', label: st.bidir ? '横向主路宽' : '进入道宽' }, { key: 'rWB', label: st.bidir ? '竖向支路宽' : '驶出道宽' }],
+      crossback: [{ key: 'rWV', label: '倒车道宽' }, { key: 'rWH', label: '转出道宽' }, { key: 'rLS', label: '下探长度（长）' }],
+      stubback: [{ key: 'rWH', label: '主路宽' }, { key: 'rWV', label: '支路宽' }, { key: 'rLS', label: '支路深度（长）' }],
+      uturn: [{ key: 'rW', label: '巷道宽' }, { key: 'rB', label: '隔墙宽' }, { key: 'rD', label: '端头深度（长）' }],
+    };
+    let roadRows = fwd
+      ? (st.type === 'uturn' ? [{ key: 'rB', label: '隔墙宽（给定）' }] : [])
+      : roadDefs[st.type];
+    roadRows = roadRows.map(r => ({ ...r, step: 0.05, dec: 2, negStep: -0.05, val: st[r.key] }));
+    const roadHint = fwd
+      ? (st.type === 'uturn' ? '巷道宽与端头深度由求解给出 →' : '道路极限尺寸由求解给出，见右侧结果 →')
+      : '输入实际道路尺寸后自动校核。';
+
+    const typeName = { corner: '直角' + (gearFixed ? '' : st.gear + '档') + '转弯', crossback: '直角R档直行转D档', stubback: '直角R档转弯转D档', uturn: (st.gear + '档') + 'U型转弯' }[st.type];
+    const diaTitle = `${st.bidir ? '双向' : '单向'}${typeName} · ${st.extreme ? '极限工况（可不在道路中心线行驶）' : '车辆在道路中心线行驶'}`;
+
+    // status + rows
+    let stValue = '…', stState = 'neutral', stUnit = '', stNote = '';
+    let dimRows = [], offsetRows = [], checkRows = [], btlText = '正在计算…', warnText = '', radiusRows = [];
+    const colors = {
+      success: ['#7fd3c1', '#00a884', '#00705a'], warning: ['#e6c46a', '#e0a800', '#9a6500'],
+      danger: ['#e59aab', '#b4233f', '#b4233f'], neutral: ['#d5dde8', '#b9c5d6', '#172033'],
+    };
+    if (res && !res.error) {
+      const d = res.dims, mc = res.minClear, c = res.veh.c;
+      radiusRows = [
+        { l: '前外角半径', v: fm(res.radii.fo) }, { l: '后外角半径', v: fm(res.radii.bo) },
+        { l: '前内角半径', v: fm(res.radii.fi) }, { l: '后内角半径', v: fm(res.radii.bi) },
+      ].map(r => ({ ...r, css: valCss('#172033') }));
+      btlText = res.btlText;
+      if (res.veh.R <= res.veh.W / 2 + c) warnText = '转弯半径不大于半车宽 + 阈值：弯内几乎无空腔，内角与掉头要求可能无解。';
+      const labels = {
+        corner: [['wA', st.bidir ? '横向主路最小宽' : '进入道最小宽'], ['wB', st.bidir ? '竖向支路最小宽' : '驶出道最小宽']],
+        crossback: [['wV', '倒车道最小宽'], ['wH', '转出道最小宽'], ['LS', '倒车下探长度（长）']],
+        stubback: [['wH', '主路最小宽'], ['wV', '支路最小宽'], ['LS', '支路最短深度（长）']],
+        uturn: [['w', '巷道最小宽'], ['D', '端头最小深度（长）']],
+      }[st.type];
+      if (fwd) {
+        if (res.infeasible) {
+          stValue = '不可行'; stState = 'danger';
+          stUnit = ''; stNote = '搜索上限内没有满足净距阈值的道路尺寸，请检查转弯半径、车体尺寸或改用极限工况。';
+          dimRows = labels.map(([k, l]) => ({ l, v: '—', css: valCss('#8290a3') }));
+        } else {
+          stValue = '已求解'; stState = 'success';
+          stUnit = `校核净距 ${fm(mc)}`;
+          stNote = `按净距阈值 ${f2(c)} m 逐位姿扫掠求解（航向步长 0.02–0.03 rad）。`;
+          dimRows = labels.map(([k, l]) => ({ l, v: fm(d[k]), css: valCss('#00705a', true) }));
+          if (st.type === 'uturn') {
+            dimRows.push({ l: '隔墙宽（给定）', v: fm(d.b), css: valCss('#172033') });
+            if (res.rs) dimRows.push({ l: '实际掉头半径', v: fm(res.rs), css: valCss('#172033') });
+          }
+        }
+      } else {
+        const state = mc >= c ? 'success' : mc >= 0 ? 'warning' : 'danger';
+        stValue = mc >= c ? '通过' : mc >= 0 ? '临界' : '越界'; stState = state;
+        stUnit = `最小净距 ${fm(mc)}`;
+        stNote = st.extreme ? '已按最优路径偏移评估；居中直行的对照见校核明细。' : '按车辆沿道路中心线行驶评估。';
+        dimRows = labels.map(([k, l]) => ({ l: l.replace('最小', '').replace('最短', ''), v: fm(d[k]), css: valCss('#172033') }));
+        if (st.type === 'uturn' && res.rs) dimRows.push({ l: '实际掉头半径', v: fm(res.rs), css: valCss('#172033') });
+        checkRows = [
+          { l: '最小净距', v: fm(mc), css: valCss(colors[state][2], true) },
+          { l: '净距阈值', v: fm(c), css: valCss('#172033') },
+          { l: '相对阈值余量', v: sgn(mc - c), css: valCss(mc >= c ? '#00705a' : '#b4233f', true) },
+        ];
+        if (res.zeroClear != null) checkRows.push({ l: '居中直行时最小净距', v: fm(res.zeroClear), css: valCss('#3d4a60') });
+      }
+      // offsets
+      const offLabels = {
+        corner: st.bidir ? [['eA', '主路路径偏移（向支路侧为正）']] : [['eA', '进入道偏移'], ['eB', '驶出道偏移']],
+        crossback: st.bidir ? [['eH', '转出道偏移']] : [['eV', '倒车道偏移'], ['eH', '转出道偏移']],
+        stubback: st.bidir ? [['a', '主路偏移（向支路侧为正）']] : [['a', '主路偏移（向支路侧为正）'], ['so', '支路偏移（向掉头外侧为正）']],
+        uturn: st.bidir ? [['eo', '外巷偏移（靠隔墙为正）']] : [['e1', '进巷偏移（靠隔墙为正）'], ['e2', '出巷偏移（靠隔墙为正）']],
+      }[st.type];
+      if (st.extreme && !res.infeasible) {
+        offsetRows = offLabels.map(([k, l]) => ({ l, v: sgn(res.off[k] || 0), css: valCss('#14395f', true) }));
+      }
+      if (st.type === 'uturn' && !res.infeasible) {
+        offsetRows.push({ l: '起弯点（距隔墙顶，+为深入端头）', v: sgn(res.off.yc || 0), css: valCss('#14395f', true) });
+      }
+      const rngName = { eA: '进入道', eB: '驶出道', eV: '倒车道', eH: '转出道', a: '主路', so: '支路', e1: '进巷', e2: '出巷', eo: '外巷' };
+      for (const r of res.ranges || []) {
+        offsetRows.push({
+          l: `${rngName[r.k] || r.k}可行偏移区间`,
+          v: r.lo == null ? '无可行值' : `${sgn(r.lo).replace(' m', '')}…${sgn(r.hi)}`,
+          css: valCss(r.lo == null ? '#b4233f' : '#3d4a60'),
+        });
+      }
+    } else if (res && res.error) {
+      stValue = '计算出错'; stState = 'danger'; stNote = res.error; btlText = '—';
+    }
+    const [bd, bar, txt] = colors[stState];
+    const stCardCss = `background:#ffffff;border:1px solid ${bd};border-radius:6px;display:flex;overflow:hidden;`;
+    const stBarCss = `width:3px;flex:none;background:${bar};`;
+    const stValCss = `${mono}font-size:19px;font-weight:700;letter-spacing:-0.5px;color:${txt};`;
+
+    // svg
+    const svg = (res && res.svg) || { vb: '0 0 10 10', gridD: '', regionD: '', centerD: '', envD: '', vioD: '', pathDD: '', pathRD: '', fs: 0.2, pills: [], annos: [] };
+    const L = st.layers;
+    const annoEls = [];
+    if (res && res.svg) {
+      const fsz = svg.fs;
+      const halo = { stroke: '#f7f9fc', strokeWidth: fsz * 0.22, paintOrder: 'stroke' };
+      if (L.dims) {
+        svg.annos.forEach((a, i) => {
+          if (a.t === 'dim') {
+            const x1 = a.a[0], y1 = -a.a[1], x2 = a.b[0], y2 = -a.b[1];
+            let nxx = -(y2 - y1), nyy = x2 - x1; const nl = Math.hypot(nxx, nyy) || 1; nxx /= nl; nyy /= nl;
+            const col = a.solved ? '#00705a' : '#3d4a60';
+            annoEls.push(React.createElement('g', { key: 'd' + i },
+              React.createElement('line', { x1, y1, x2, y2, stroke: col, strokeWidth: 1.1, vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('line', { x1: x1 - nxx * fsz * 0.45, y1: y1 - nyy * fsz * 0.45, x2: x1 + nxx * fsz * 0.45, y2: y1 + nyy * fsz * 0.45, stroke: col, strokeWidth: 1.1, vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('line', { x1: x2 - nxx * fsz * 0.45, y1: y2 - nyy * fsz * 0.45, x2: x2 + nxx * fsz * 0.45, y2: y2 + nyy * fsz * 0.45, stroke: col, strokeWidth: 1.1, vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('text', { x: (x1 + x2) / 2 + a.tx, y: (y1 + y2) / 2 - fsz * 0.55 + a.ty, fontSize: fsz, fill: col, textAnchor: 'middle', fontFamily: 'Consolas,monospace', fontWeight: a.solved ? 700 : 400, ...halo }, a.label + ' m')
+            ));
+          }
+          if (a.t === 'yc') {
+            annoEls.push(React.createElement('g', { key: 'y' + i },
+              React.createElement('line', { x1: a.x0 - 0.9, y1: -a.y, x2: a.x0 + 0.9, y2: -a.y, stroke: '#14395f', strokeWidth: 1.2, strokeDasharray: '4 3', vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('text', { x: a.x0, y: -a.y - fsz * 0.5, fontSize: fsz * 0.92, fill: '#14395f', textAnchor: 'middle', fontFamily: 'Consolas,monospace', ...halo }, a.label)
+            ));
+          }
+          if (a.t === 'btl') {
+            annoEls.push(React.createElement('g', { key: 'b' + i },
+              React.createElement('line', { x1: a.bp[0], y1: -a.bp[1], x2: a.wp[0], y2: -a.wp[1], stroke: '#b4233f', strokeWidth: 1.2, strokeDasharray: '3 2', vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('circle', { cx: a.wp[0], cy: -a.wp[1], r: fsz * 0.3, fill: '#ef476f', stroke: '#a10f2b', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }),
+              React.createElement('text', { x: a.wp[0], y: -a.wp[1] - fsz * 0.7, fontSize: fsz, fill: '#b4233f', textAnchor: 'middle', fontFamily: 'Consolas,monospace', fontWeight: 700, ...halo }, a.label)
+            ));
+          }
+        });
+      }
+      if ((this.props.showGearLabels ?? true)) {
+        svg.pills.forEach((p, i) => {
+          const wpx = p.t.length * fsz * 0.66 + fsz * 0.8, hpx = fsz * 1.5;
+          annoEls.push(React.createElement('g', { key: 'p' + i },
+            React.createElement('rect', { x: p.x - wpx / 2, y: -p.y - hpx / 2, width: wpx, height: hpx, rx: fsz * 0.3, fill: '#ffffff', stroke: '#b9c5d6', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }),
+            React.createElement('text', { x: p.x, y: -p.y + fsz * 0.34, fontSize: fsz * 0.92, fill: '#3d4a60', textAnchor: 'middle', fontFamily: "'Segoe UI','Microsoft YaHei UI',sans-serif" }, p.t)
+          ));
+        });
+      }
+    }
+
+    return {
+      // tabs
+      onTab, isMap: st.tab === 'map', isClear: st.tab === 'clear', isCalc: st.tab === 'calc',
+      tabMapCss: st.tab === 'map' ? tabOn : tabOff,
+      tabClearCss: st.tab === 'clear' ? tabOn : tabOff,
+      tabCalcCss: st.tab === 'calc' ? tabOn : tabOff,
+      statusText: st.tab === 'calc' ? '场景速算：离线几何计算，不请求调度后端' : '就绪',
+      // controls
+      onSeg, onNum, onSpin, onLayer,
+      modeSeg: seg('mode', [{ v: 'fwd', label: '求道路极限' }, { v: 'chk', label: '校核给定道路' }], st.mode),
+      modeHint: fwd ? '给定车辆参数，求道路的极限尺寸与所需路径偏移。' : '给定道路尺寸，判定能否通过并给出可行偏移。',
+      typeTiles: tiles,
+      dirSeg: seg('bidir', [{ v: false, label: '单向' }, { v: true, label: '双向' }], st.bidir),
+      gearSeg: seg('gear', [{ v: 'D', label: 'D档（前进）' }, { v: 'R', label: 'R档（倒车）' }], st.gear),
+      gearFixed, gearFree: !gearFixed,
+      extSeg: seg('extreme', [{ v: false, label: '道路中心线' }, { v: true, label: '极限工况' }], st.extreme),
+      extHint: st.extreme ? '极限工况：允许路径偏离道路中心线，自动求最优偏移。' : '车辆必须沿道路中心线行驶（双向场景按两方向最不利取值）。',
+      vehRows, roadRows, roadHint,
+      // diagram
+      diaTitle, busy: st.busy,
+      layerSeg: [
+        { k: 'env', label: '扫掠包络', on: L.env }, { k: 'dims', label: '尺寸标注', on: L.dims }, { k: 'grid', label: '网格 0.5 m', on: L.grid },
+      ].map(s => ({
+        ...s, tick: s.on ? '✓' : '',
+        boxCss: `width:13px;height:13px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;line-height:1;${s.on ? 'background:#2474d8;color:#ffffff;border:1px solid #2474d8;' : 'background:#ffffff;border:1px solid #b9c5d6;'}`,
+      })),
+      vb: svg.vb,
+      gridD: L.grid ? svg.gridD : '',
+      regionD: svg.regionD, centerD: svg.centerD,
+      envD: L.env ? svg.envD : '', vioD: svg.vioD,
+      pathDD: svg.pathDD, pathRD: svg.pathRD,
+      annos: annoEls,
+      // results
+      stTitle: fwd ? '求解状态' : '判定', stValue, stUnit, stNote, stCardCss, stBarCss, stValCss,
+      dimCardTitle: fwd ? '道路极限参数（求解值）' : '给定道路尺寸',
+      dimRows, hasChecks: checkRows.length > 0, checkRows,
+      hasOffsets: offsetRows.length > 0, offsetRows, radiusRows,
+      btlText, hasWarn: !!warnText, warnText,
+    };
+  }
+}
+</script>
+</body>
+</html>

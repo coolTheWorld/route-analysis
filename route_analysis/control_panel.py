@@ -35,6 +35,7 @@ from route_analysis.models import (
     Lane,
     Point2D,
     SegmentKind,
+    VehicleSection,
 )
 from route_analysis.turn_measurements import CalculatedMeasurement
 from route_analysis.turn_radius import CornerRadiusKind, TurnKind, TurnSide
@@ -100,6 +101,15 @@ def _coordinate_spin(
     spin.setMinimumWidth(72)
     spin.fit_width()
     return spin
+
+
+VEHICLE_SECTION_OFF = "off"
+VEHICLE_SECTION_CHOICES: tuple[tuple[str, str], ...] = (
+    ("整车", VehicleSection.FULL.value),
+    ("仅前段", VehicleSection.FRONT.value),
+    ("仅后段", VehicleSection.REAR.value),
+    ("关", VEHICLE_SECTION_OFF),
+)
 
 
 class ControlPanel(QScrollArea):
@@ -169,28 +179,40 @@ class ControlPanel(QScrollArea):
         grid.addWidget(QLabel("中心线"), 0, 1)
         grid.addWidget(QLabel("车辆"), 0, 2)
         grid.addWidget(QLabel("越界"), 0, 3)
-        self.layer_checks: dict[str, tuple[QCheckBox, QCheckBox, QCheckBox]] = {}
+        self.layer_checks: dict[str, tuple[QCheckBox, QCheckBox]] = {}
+        self.vehicle_combos: dict[str, QComboBox] = {}
+        self._vehicle_sections: dict[str, str] = {}
         for row, (name, label) in enumerate(
             (("dispatched", "下发"), ("actual", "实际")),
             start=1,
         ):
             grid.addWidget(QLabel(label), row, 0)
-            checks = (QCheckBox(), QCheckBox(), QCheckBox())
-            for column, checkbox in enumerate(checks, start=1):
+            centerline = QCheckBox()
+            violations = QCheckBox()
+            for checkbox, column, layer_label in (
+                (centerline, 1, "中心线"),
+                (violations, 3, "异常点"),
+            ):
                 checkbox.setChecked(True)
-                layer_label = ("中心线", "车辆矩形", "异常点")[column - 1]
                 checkbox.setAccessibleName(f"{label}路径{layer_label}")
                 grid.addWidget(checkbox, row, column)
-            checks[0].toggled.connect(
+            combo = QComboBox()
+            for text, value in VEHICLE_SECTION_CHOICES:
+                combo.addItem(text, value)
+            combo.setAccessibleName(f"{label}路径车辆矩形")
+            grid.addWidget(combo, row, 2)
+            centerline.toggled.connect(
                 lambda value, path=name: self.canvas.set_path_layer(path, centerline=value)
             )
-            checks[1].toggled.connect(
-                lambda value, path=name: self.canvas.set_path_layer(path, vehicles=value)
-            )
-            checks[2].toggled.connect(
+            violations.toggled.connect(
                 lambda value, path=name: self.canvas.set_path_layer(path, violations=value)
             )
-            self.layer_checks[name] = checks
+            combo.currentIndexChanged.connect(
+                lambda _index, path=name: self._vehicle_section_changed(path)
+            )
+            self.layer_checks[name] = (centerline, violations)
+            self.vehicle_combos[name] = combo
+            self._vehicle_sections[name] = VehicleSection.FULL.value
         layout.addLayout(grid)
         isolate = QHBoxLayout()
         dispatched_only = QPushButton("仅下发")
@@ -222,6 +244,18 @@ class ControlPanel(QScrollArea):
         layout.addWidget(self.radius_layer_check)
         return group
 
+    def _vehicle_section_changed(self, path_name: str) -> None:
+        """Apply the four-state vehicle choice; the off state only hides the layer."""
+
+        value = str(self.vehicle_combos[path_name].currentData())
+        if value == VEHICLE_SECTION_OFF:
+            self.canvas.set_path_layer(path_name, vehicles=False)
+            return
+        self._vehicle_sections[path_name] = value
+        self.canvas.set_path_layer(
+            path_name, vehicles=True, vehicle_section=VehicleSection(value)
+        )
+
     def _isolate(self, path_name: str | None) -> None:
         self._updating = True
         try:
@@ -229,6 +263,10 @@ class ControlPanel(QScrollArea):
                 checked = path_name is None or name == path_name
                 for checkbox in checks:
                     checkbox.setChecked(checked)
+                combo = self.vehicle_combos[name]
+                # Hiding a path must not forget which end the user was looking at.
+                target = self._vehicle_sections[name] if checked else VEHICLE_SECTION_OFF
+                combo.setCurrentIndex(max(0, combo.findData(target)))
         finally:
             self._updating = False
         self.canvas.isolate_path(path_name)
@@ -238,9 +276,10 @@ class ControlPanel(QScrollArea):
         actions = QGridLayout()
         self.draw_button = QPushButton("绘制新车道")
         self.draw_button.clicked.connect(self._toggle_drawing)
-        generate_button = QPushButton("按路径生成")
-        generate_button.setAccessibleName("按下发或实际路径自动生成车道")
-        generate_button.clicked.connect(self.generate_lane_requested)
+        self.generate_button = QPushButton("按路径生成")
+        self.generate_button.setAccessibleName("在当前路径的两个点位之间生成车道")
+        self.generate_button.clicked.connect(self.generate_lane_requested)
+        generate_button = self.generate_button
         delete_button = QPushButton("删除")
         delete_button.clicked.connect(self._delete_selected)
         undo_button = QPushButton("撤销")
@@ -525,6 +564,11 @@ class ControlPanel(QScrollArea):
         self.dimension_source_label.setText(f"车辆尺寸来源：{dimensions_source}")
         self._populate_measurements("dispatched", dispatched)
         self._populate_measurements("actual", actual)
+
+    def set_lane_pick_mode(self, active: bool) -> None:
+        """Flip the generate button while the canvas is waiting for two samples."""
+
+        self.generate_button.setText("结束选点" if active else "按路径生成")
 
     def set_manual_radius_mode(self, path_name: str, active: bool) -> None:
         self.radius_manual_buttons[path_name].setText(

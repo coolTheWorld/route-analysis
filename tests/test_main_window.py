@@ -280,30 +280,96 @@ def test_returning_to_tasks_keeps_displayed_paths_analyzable(qtbot: QtBot, tmp_p
         window.canvas.mark_saved()
 
 
-def test_confirming_auto_lane_adds_once_and_persists_last_generation_mode(
+def _lane_pick_window(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+) -> MainWindow:
     make_config(tmp_path)
     window = MainWindow(tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False)
     qtbot.addWidget(window)
-    window._dispatched_path = (
-        PosePoint(0, 0, None),
-        PosePoint(1, 0.01, None),
-        PosePoint(2, 0, None),
+    window._dispatched_path = tuple(
+        PosePoint(index * 1.0, 0.0, 0.0) for index in range(6)
     )
     monkeypatch.setattr(
         AutoLaneDialog,
         "exec",
         lambda _dialog: AutoLaneDialog.DialogCode.Accepted,
     )
+    return window
+
+
+def test_generating_a_lane_takes_two_picked_samples(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
 
     window.open_auto_lane_dialog()
+    assert window.canvas.sample_pick_kind == "lane"
+    assert window.control_panel.generate_button.text() == "结束选点"
 
+    window._lane_endpoint_selected("dispatched", 1)
+    assert window.canvas.current_layout().lanes == []
+
+    window._lane_endpoint_selected("dispatched", 4)
     assert len(window.canvas.current_layout().lanes) == 1
     assert window.canvas.undo_stack.count() == 1
-    assert ConfigRepository(tmp_path).load().lane_generation_mode == "sharp"
+    saved = ConfigRepository(tmp_path).load()
+    assert saved.lane_generation_mode == "sharp"
+    assert saved.lane_connection == "path"
     window.canvas.undo_stack.undo()
     assert window.canvas.current_layout().lanes == []
+
+
+def test_the_generated_lane_reaches_past_both_chosen_samples(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._lane_endpoint_selected("dispatched", 1)
+    window._lane_endpoint_selected("dispatched", 4)
+
+    try:
+        lane = window.canvas.current_layout().lanes[0]
+        xs = [anchor.point.x for anchor in lane.anchors]
+        # Vehicle is 1 m front and 1 m rear here, so the lane must run 0.0 .. 5.0.
+        assert min(xs) == pytest.approx(0.0)
+        assert max(xs) == pytest.approx(5.0)
+    finally:
+        window.canvas.mark_saved()
+
+
+def test_picking_the_same_sample_twice_keeps_the_mode_open(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._lane_endpoint_selected("dispatched", 2)
+    window._lane_endpoint_selected("dispatched", 2)
+
+    assert window.canvas.current_layout().lanes == []
+    assert window.canvas.sample_pick_kind == "lane"
+    assert "同一个样本" in window.status_label.text()
+
+
+def test_the_button_toggles_the_pick_mode_off_again(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window.open_auto_lane_dialog()
+    assert window.canvas.sample_pick_kind is None
+    assert window.control_panel.generate_button.text() == "按路径生成"
+
+
+def test_starting_a_radius_measurement_cancels_lane_picking(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _lane_pick_window(qtbot, tmp_path, monkeypatch)
+    window.open_auto_lane_dialog()
+    window._toggle_manual_radius("dispatched")
+
+    assert window.canvas.sample_pick_kind == "radius"
+    assert window.control_panel.generate_button.text() == "按路径生成"
+    assert window._lane_pick_path is None
 
 
 def test_logging_failure_status_is_persistent_and_recovers(
@@ -502,3 +568,111 @@ def test_lane_drawing_guidance_is_shown_in_status_bar(qtbot: QtBot, tmp_path: Pa
 
     assert result is None
     assert "至少需要两个锚点" in window.status_label.text()
+
+
+def _loaded_window(qtbot: QtBot, tmp_path: Path) -> MainWindow:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    window.show()
+    window.refresh_current_level()
+    qtbot.waitUntil(lambda: window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "tasks" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.navigation_level == "commands" and window.table.rowCount() == 1)
+    window.table.selectRow(0)
+    window.activate_selected()
+    qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
+    return window
+
+
+def test_canvas_area_offers_the_map_clearance_and_scenario_tabs(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    assert window.canvas_tabs.count() == 3
+    assert window.canvas_tabs.tabText(0) == "地图"
+    assert window.canvas_tabs.tabText(1) == "通行余量"
+    assert window.canvas_tabs.tabText(2) == "场景速算"
+    assert window.canvas_tabs.widget(0) is window.canvas
+    assert window.canvas_tabs.widget(2) is window.scenario_panel
+    assert window.canvas_tabs.currentIndex() == 0
+
+
+def test_the_scenario_tab_works_with_no_command_selected(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Fully offline: usable with no command selected, seeded from config.json."""
+
+    make_config(tmp_path)
+    window = MainWindow(
+        tmp_path, client_factory=lambda _settings: FakeClient(), auto_load=False
+    )
+    qtbot.addWidget(window)
+    panel = window.scenario_panel
+    assert panel.isEnabled()
+    assert panel.vehicle_inputs.dimensions == window.config.default_vehicle
+    assert panel.vehicle_inputs.threshold == window.config.analysis.clearance_threshold
+
+
+def test_clearance_is_not_solved_while_its_tab_is_hidden(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.analyze_now()
+    qtbot.wait(200)
+    assert window.canvas_tabs.currentIndex() == 0
+    assert window._clearance_stale
+    assert window.clearance_panel.analysis is None
+
+
+def test_opening_the_clearance_tab_without_lanes_leaves_the_panel_empty(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    qtbot.wait(300)
+    assert window.clearance_panel.analysis is None
+    assert not window.clearance_panel.overview.csv_button.isEnabled()
+
+
+def test_selecting_a_bottleneck_positions_the_map_without_leaving_the_page(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_pose_selected(0)
+    assert window.canvas_tabs.currentIndex() == 1
+    assert window.path_details.selected_source_index("dispatched") == 0
+    assert "地图" in window.status_label.text()
+
+
+def test_clicking_the_profile_jumps_to_the_map(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_map_requested(0)
+    assert window.canvas_tabs.currentIndex() == 0
+    assert window.path_details.selected_source_index("dispatched") == 0
+
+
+def test_locating_an_out_of_range_pose_changes_nothing(qtbot: QtBot, tmp_path: Path) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.canvas_tabs.setCurrentIndex(1)
+    window._clearance_map_requested(999)
+    assert window.canvas_tabs.currentIndex() == 1
+
+
+def test_clearance_exports_do_nothing_without_an_analysis(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    window = _loaded_window(qtbot, tmp_path)
+    window.export_offset_table()
+    window.export_clearance_report()
+    assert window.clearance_panel.analysis is None

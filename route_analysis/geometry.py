@@ -18,6 +18,7 @@ from route_analysis.models import (
     PosePoint,
     SegmentKind,
     VehicleDimensions,
+    VehicleSection,
 )
 
 
@@ -61,17 +62,27 @@ def interpolate_poses(
     return poses
 
 
-def vehicle_polygon(pose: PosePoint, dimensions: VehicleDimensions) -> Polygon:
-    """Build a vehicle rectangle around a front-axle-center pose."""
+def vehicle_polygon(
+    pose: PosePoint,
+    dimensions: VehicleDimensions,
+    section: VehicleSection = VehicleSection.FULL,
+) -> Polygon:
+    """Build a vehicle rectangle around a front-axle-center pose.
+
+    ``section`` cuts the rectangle at the reference point so one end can be read on its
+    own. It is a drawing choice: analysis never passes anything but the whole envelope.
+    """
 
     if pose.yaw is None:
         raise ValueError("vehicle polygon requires yaw")
     half_width = dimensions.width / 2
+    front = dimensions.center_front if section is not VehicleSection.REAR else 0.0
+    rear = dimensions.center_rear if section is not VehicleSection.FRONT else 0.0
     local_corners = (
-        (dimensions.center_front, half_width),
-        (dimensions.center_front, -half_width),
-        (-dimensions.center_rear, -half_width),
-        (-dimensions.center_rear, half_width),
+        (front, half_width),
+        (front, -half_width),
+        (-rear, -half_width),
+        (-rear, half_width),
     )
     cos_yaw = math.cos(pose.yaw)
     sin_yaw = math.sin(pose.yaw)
@@ -83,6 +94,38 @@ def vehicle_polygon(pose: PosePoint, dimensions: VehicleDimensions) -> Polygon:
         for x, y in local_corners
     ]
     return Polygon(world_corners)
+
+
+def envelope_overhang(
+    pose: PosePoint, dimensions: VehicleDimensions, heading: float
+) -> float:
+    """How far the vehicle envelope reaches past its pose along ``heading``.
+
+    Equals the centre-front distance when ``heading`` matches the pose yaw and the
+    centre-rear distance when it opposes it, but stays correct when the two differ —
+    which is exactly the case a straight line drawn between two unaligned poses creates.
+    """
+
+    if pose.yaw is None:
+        raise ValueError("车辆包络外伸量需要位姿的 yaw")
+    if not math.isfinite(heading):
+        raise ValueError("方向必须是有限值")
+    cos_yaw = math.cos(pose.yaw)
+    sin_yaw = math.sin(pose.yaw)
+    axis_x = math.cos(heading)
+    axis_y = math.sin(heading)
+    half_width = dimensions.width / 2
+    corners = (
+        (dimensions.center_front, half_width),
+        (dimensions.center_front, -half_width),
+        (-dimensions.center_rear, -half_width),
+        (-dimensions.center_rear, half_width),
+    )
+    return max(
+        (longitudinal * cos_yaw - lateral * sin_yaw) * axis_x
+        + (longitudinal * sin_yaw + lateral * cos_yaw) * axis_y
+        for longitudinal, lateral in corners
+    )
 
 
 def _point_line_distance(point: Point2D, start: Point2D, end: Point2D) -> float:
