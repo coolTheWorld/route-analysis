@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QGraphicsPolygonItem
+from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsTextItem
 from pytestqt.qtbot import QtBot
 
 from route_analysis.api_client import (
@@ -134,7 +134,7 @@ def test_single_window_drills_order_task_command_and_loads_both_paths(
 
     qtbot.waitUntil(lambda: window.canvas.path_point_counts == {"dispatched": 2, "actual": 2})
     qtbot.waitUntil(
-        lambda: "自动 0" in window.control_panel.radius_summaries["dispatched"].text()
+        lambda: window.control_panel.radius_summaries["dispatched"].text() == "0 条"
     )
     assert "929" in window.breadcrumb_label.text()
     assert "41330" in window.breadcrumb_label.text()
@@ -428,7 +428,7 @@ def test_saving_changed_vehicle_dimensions_refreshes_canvas_vehicle_frames(
     assert frame_dimensions(60) == pytest.approx((4, 7))
 
 
-def test_automatic_and_manual_radius_measurements_are_saved_locally(
+def test_radius_measurements_are_saved_locally_and_deleted_from_the_tree(
     qtbot: QtBot,
     tmp_path: Path,
 ) -> None:
@@ -452,21 +452,22 @@ def test_automatic_and_manual_radius_measurements_are_saved_locally(
         "VIN-1",
         (CommandPathData.from_poses(path), CommandPathData.empty()),
     )
-    window.control_panel.radius_auto_buttons["dispatched"].click()
-
-    tree = window.control_panel.radius_trees["dispatched"]
-
-    def group_child_count(index: int) -> int:
-        group = tree.topLevelItem(index)
-        assert group is not None
-        return group.childCount()
-
-    qtbot.waitUntil(lambda: group_child_count(0) == 1)
-    assert group_child_count(1) == 0
     window.control_panel.radius_manual_buttons["dispatched"].click()
     window._radius_endpoint_selected("dispatched", 0)
     window._radius_endpoint_selected("dispatched", 20)
-    assert group_child_count(1) == 1
+
+    tree = window.control_panel.radius_trees["dispatched"]
+    assert tree.topLevelItemCount() == 1
+    measurement_item = tree.topLevelItem(0)
+    assert measurement_item is not None
+    assert measurement_item.childCount() == 5
+    # Both endpoints stay highlighted next to the finished measurement's graphics.
+    labels = sorted(
+        item.toPlainText()
+        for item in window.canvas.scene().items()
+        if isinstance(item, QGraphicsTextItem) and item.toPlainText().isdigit()
+    )
+    assert labels == ["1", "21"]
 
     scope = MeasurementScope(
         window._server_id(),
@@ -477,19 +478,16 @@ def test_automatic_and_manual_radius_measurements_are_saved_locally(
         "dispatched",
     )
     saved = RadiusMeasurementRepository(tmp_path).load(scope, path_fingerprint(path))
-    assert len(saved.automatic_records) == 1
-    assert len(saved.manual_records) == 1
+    assert len(saved.records) == 1
+    assert saved.records[0].start_index == 0
+    assert saved.records[0].end_index == 20
 
-    window._clear_automatic_radii_for_threshold_change()
+    window._delete_radius_measurement("dispatched", saved.records[0].id)
 
-    assert group_child_count(0) == 0
-    assert group_child_count(1) == 1
-    saved_after_threshold_change = RadiusMeasurementRepository(tmp_path).load(
+    assert tree.topLevelItemCount() == 0
+    assert RadiusMeasurementRepository(tmp_path).load(
         scope, path_fingerprint(path)
-    )
-    assert saved_after_threshold_change.automatic_records == ()
-    assert len(saved_after_threshold_change.manual_records) == 1
-    assert "重新自动计算" in window.status_label.text()
+    ).records == ()
 
 
 def test_lane_drawing_guidance_is_shown_in_status_bar(qtbot: QtBot, tmp_path: Path) -> None:

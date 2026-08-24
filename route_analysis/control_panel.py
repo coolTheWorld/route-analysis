@@ -36,7 +36,7 @@ from route_analysis.models import (
     Point2D,
     SegmentKind,
 )
-from route_analysis.turn_measurements import CalculatedMeasurement, MeasurementSource
+from route_analysis.turn_measurements import CalculatedMeasurement
 from route_analysis.turn_radius import CornerRadiusKind, TurnKind, TurnSide
 
 CORNER_LABELS = {
@@ -110,7 +110,6 @@ class ControlPanel(QScrollArea):
     analyze_requested = Signal()
     generate_lane_requested = Signal()
     direction_changed = Signal(float)
-    auto_radius_requested = Signal(str)
     manual_radius_requested = Signal(str)
     radius_delete_requested = Signal(str, str)
     radius_rename_requested = Signal(str, str, str)
@@ -374,7 +373,6 @@ class ControlPanel(QScrollArea):
         layout.addWidget(self.dimension_source_label)
         self.radius_summaries: dict[str, QLabel] = {}
         self.radius_trees: dict[str, QTreeWidget] = {}
-        self.radius_auto_buttons: dict[str, QPushButton] = {}
         self.radius_manual_buttons: dict[str, QPushButton] = {}
         self.radius_delete_buttons: dict[str, QPushButton] = {}
         self._radius_tree_updating = False
@@ -383,26 +381,20 @@ class ControlPanel(QScrollArea):
             path_title.setStyleSheet("font-weight:600;margin-top:4px")
             layout.addWidget(path_title)
             actions = QHBoxLayout()
-            auto_button = QPushButton("自动计算半径")
-            manual_button = QPushButton("手动计算半径")
+            manual_button = QPushButton("计算转弯半径")
             delete_button = QPushButton("删除选中")
-            auto_button.clicked.connect(
-                lambda _checked=False, path=path_name: self.auto_radius_requested.emit(path)
-            )
             manual_button.clicked.connect(
                 lambda _checked=False, path=path_name: self.manual_radius_requested.emit(path)
             )
             delete_button.clicked.connect(
                 lambda _checked=False, path=path_name: self._delete_radius_measurement(path)
             )
-            actions.addWidget(auto_button)
             actions.addWidget(manual_button)
             actions.addWidget(delete_button)
             layout.addLayout(actions)
-            self.radius_auto_buttons[path_name] = auto_button
             self.radius_manual_buttons[path_name] = manual_button
             self.radius_delete_buttons[path_name] = delete_button
-            summary = QLabel(f"{title}：自动 0，手动 0")
+            summary = QLabel(f"{title}：0 条")
             summary.setWordWrap(True)
             summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(summary)
@@ -474,7 +466,7 @@ class ControlPanel(QScrollArea):
 
     def _add_measurement_item(
         self,
-        parent: QTreeWidgetItem,
+        tree: QTreeWidget,
         measurement: CalculatedMeasurement,
     ) -> None:
         record = measurement.record
@@ -488,7 +480,7 @@ class ControlPanel(QScrollArea):
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setData(0, Qt.ItemDataRole.UserRole, measurement)
         item.setData(0, Qt.ItemDataRole.UserRole + 1, record.name)
-        parent.addChild(item)
+        tree.addTopLevelItem(item)
         radius = measurement.radius
         if not radius.valid or radius.front_axle_radius is None:
             detail = QTreeWidgetItem(["原因", radius.error or "未知原因", ""])
@@ -510,30 +502,13 @@ class ControlPanel(QScrollArea):
         measurements: tuple[CalculatedMeasurement, ...],
     ) -> None:
         tree = self.radius_trees[path_name]
-        automatic = tuple(
-            item
-            for item in measurements
-            if item.record.source is MeasurementSource.AUTOMATIC
-        )
-        manual = tuple(
-            item for item in measurements if item.record.source is MeasurementSource.MANUAL
-        )
         self._radius_tree_updating = True
         tree.blockSignals(True)
         try:
             tree.clear()
-            for label, group_measurements in (
-                ("自动测量", automatic),
-                ("手动测量", manual),
-            ):
-                group = QTreeWidgetItem([label, f"{len(group_measurements)} 条", ""])
-                tree.addTopLevelItem(group)
-                for measurement in group_measurements:
-                    self._add_measurement_item(group, measurement)
-                group.setExpanded(True)
-            self.radius_summaries[path_name].setText(
-                f"自动 {len(automatic)}，手动 {len(manual)}"
-            )
+            for measurement in measurements:
+                self._add_measurement_item(tree, measurement)
+            self.radius_summaries[path_name].setText(f"{len(measurements)} 条")
             for column in range(3):
                 tree.resizeColumnToContents(column)
         finally:
@@ -553,25 +528,23 @@ class ControlPanel(QScrollArea):
 
     def set_manual_radius_mode(self, path_name: str, active: bool) -> None:
         self.radius_manual_buttons[path_name].setText(
-            "结束手动计算" if active else "手动计算半径"
+            "结束选择端点" if active else "计算转弯半径"
         )
 
     def select_radius_measurement(self, path_name: str, measurement_id: str) -> None:
         tree = self.radius_trees[path_name]
-        for group_index in range(tree.topLevelItemCount()):
-            group = tree.topLevelItem(group_index)
-            if group is None:
+        for row in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(row)
+            if item is None:
                 continue
-            for measurement_index in range(group.childCount()):
-                item = group.child(measurement_index)
-                measurement = item.data(0, Qt.ItemDataRole.UserRole)
-                if (
-                    isinstance(measurement, CalculatedMeasurement)
-                    and measurement.record.id == measurement_id
-                ):
-                    tree.setCurrentItem(item)
-                    group.setExpanded(True)
-                    return
+            measurement = item.data(0, Qt.ItemDataRole.UserRole)
+            if (
+                isinstance(measurement, CalculatedMeasurement)
+                and measurement.record.id == measurement_id
+            ):
+                tree.setCurrentItem(item)
+                item.setExpanded(True)
+                return
 
     def set_configuration(self, *, default_lane_width: float, direction: float) -> None:
         self.default_lane_width = default_lane_width

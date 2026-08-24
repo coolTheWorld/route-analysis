@@ -134,7 +134,6 @@ class AppConfig:
                 "clearance_threshold": self.analysis.clearance_threshold,
                 "bezier_tolerance": self.analysis.bezier_tolerance,
                 "miter_limit": self.analysis.miter_limit,
-                "turn_threshold": self.analysis.turn_threshold,
                 "lane_generation_deviation": self.analysis.lane_generation_deviation,
             },
             "snap_to_path": self.snap_to_path,
@@ -178,9 +177,6 @@ class AppConfig:
                     ),
                     bezier_tolerance=_float_value(analysis.get("bezier_tolerance", 0.02)),
                     miter_limit=_float_value(analysis.get("miter_limit", 4.0)),
-                    turn_threshold=_float_value(
-                        analysis.get("turn_threshold", math.pi / 6)
-                    ),
                     lane_generation_deviation=_float_value(
                         analysis.get("lane_generation_deviation", 0.05)
                     ),
