@@ -55,6 +55,7 @@ from route_analysis.models import (
     PosePoint,
     SegmentKind,
     VehicleDimensions,
+    VehicleSection,
 )
 from route_analysis.radius_graphics import add_whole_turn_graphics
 from route_analysis.storage import LaneLayout
@@ -67,6 +68,9 @@ PATH_POINT_CROWDING_FACTOR = 0.8
 RADIUS_ENDPOINT_DIAMETER_PX = 16.0
 RADIUS_NEIGHBOUR_SPAN = 2
 RADIUS_ENDPOINT_COLOR = "#b4233f"
+LANE_ENDPOINT_COLOR = "#2474d8"
+PICK_RADIUS = "radius"
+PICK_LANE = "lane"
 
 
 def radius_candidate_indices(
@@ -235,6 +239,7 @@ class PathVisibility:
     centerline: bool = True
     vehicles: bool = True
     violations: bool = True
+    vehicle_section: VehicleSection = VehicleSection.FULL
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +281,8 @@ class RouteCanvas(QGraphicsView):
     drawing_status_changed = Signal(str)
     radius_endpoint_selected = Signal(str, int)
     manual_radius_cancelled = Signal(str)
+    lane_endpoint_selected = Signal(str, int)
+    lane_pick_cancelled = Signal(str)
     path_point_selected = Signal(str, int)
 
     PATH_COLORS: ClassVar[dict[str, QColor]] = {
@@ -334,8 +341,9 @@ class RouteCanvas(QGraphicsView):
         self._lane_preview: Lane | None = None
         self._turn_radius_layer = False
         self._selected_radius: tuple[str, TurnRadiusSection] | None = None
-        self._manual_radius_path: str | None = None
-        self._manual_radius_endpoints: tuple[int, ...] = ()
+        self._pick_kind: str | None = None
+        self._pick_path: str | None = None
+        self._pick_endpoints: tuple[int, ...] = ()
 
         self.undo_stack = QUndoStack(self)
         self._rebuild_scene()
@@ -474,8 +482,9 @@ class RouteCanvas(QGraphicsView):
         self._last_path_click = None
         self._pending_path_click = None
         self._selected_radius = None
-        self._manual_radius_path = None
-        self._manual_radius_endpoints = ()
+        self._pick_kind = None
+        self._pick_path = None
+        self._pick_endpoints = ()
         self._rebuild_scene()
         self.fit_content()
 
@@ -492,8 +501,9 @@ class RouteCanvas(QGraphicsView):
         self._last_path_click = None
         self._pending_path_click = None
         self._selected_radius = None
-        self._manual_radius_path = None
-        self._manual_radius_endpoints = ()
+        self._pick_kind = None
+        self._pick_path = None
+        self._pick_endpoints = ()
         self._rebuild_scene()
         self.fit_content()
 
@@ -607,21 +617,50 @@ class RouteCanvas(QGraphicsView):
         self._selected_radius = None
         self._rebuild_scene()
 
-    def set_manual_radius_mode(self, path_name: str | None) -> None:
-        if path_name is not None and path_name not in self._paths:
+    def set_sample_pick_mode(self, kind: str | None, path_name: str | None = None) -> None:
+        """Enter one sample-picking mode, leaving whichever one was active.
+
+        Only one may be live at a time: two different meanings for a click on the same
+        canvas is the kind of ambiguity nobody recovers from.
+        """
+
+        if kind is not None and (path_name is None or path_name not in self._paths):
             raise ValueError(f"unknown path: {path_name}")
-        self._manual_radius_path = path_name
-        self._manual_radius_endpoints = ()
-        if path_name is None:
+        previous_kind, previous_path = self._pick_kind, self._pick_path
+        self._pick_kind = kind
+        self._pick_path = path_name if kind is not None else None
+        self._pick_endpoints = ()
+        if kind is None:
             self.unsetCursor()
         else:
             self.setCursor(Qt.CursorShape.CrossCursor)
         self._rebuild_scene()
+        if previous_kind is not None and previous_path is not None and previous_kind != kind:
+            self._emit_pick_cancelled(previous_kind, previous_path)
+
+    def _emit_pick_cancelled(self, kind: str, path_name: str) -> None:
+        if kind == PICK_RADIUS:
+            self.manual_radius_cancelled.emit(path_name)
+        else:
+            self.lane_pick_cancelled.emit(path_name)
+
+    def set_manual_radius_mode(self, path_name: str | None) -> None:
+        self.set_sample_pick_mode(PICK_RADIUS if path_name is not None else None, path_name)
+
+    def set_lane_pick_mode(self, path_name: str | None) -> None:
+        self.set_sample_pick_mode(PICK_LANE if path_name is not None else None, path_name)
+
+    @property
+    def sample_pick_kind(self) -> str | None:
+        return self._pick_kind
+
+    def set_sample_pick_endpoints(self, indices: Iterable[int]) -> None:
+        """Show the picked endpoints; an empty sequence clears the markers."""
+        self._pick_endpoints = tuple(indices)
+        self._rebuild_scene()
 
     def set_manual_radius_endpoints(self, indices: Iterable[int]) -> None:
-        """Show the picked endpoints and their neighbourhoods; empty clears the markers."""
-        self._manual_radius_endpoints = tuple(indices)
-        self._rebuild_scene()
+        self.set_sample_pick_endpoints(indices)
 
     def set_path_layer(
         self,
@@ -630,6 +669,7 @@ class RouteCanvas(QGraphicsView):
         centerline: bool | None = None,
         vehicles: bool | None = None,
         violations: bool | None = None,
+        vehicle_section: VehicleSection | None = None,
     ) -> None:
         visibility = self._visibility[path_name]
         if centerline is not None:
@@ -638,6 +678,8 @@ class RouteCanvas(QGraphicsView):
             visibility.vehicles = vehicles
         if violations is not None:
             visibility.violations = violations
+        if vehicle_section is not None:
+            visibility.vehicle_section = vehicle_section
         self._rebuild_scene()
 
     def isolate_path(self, path_name: str | None) -> None:
@@ -1033,19 +1075,19 @@ class RouteCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             self._pending_path_click = None
             raw = self._raw_from_event(event)
-            if self._manual_radius_path is not None:
-                candidates = self._path_point_candidates(self._manual_radius_path, raw)
+            if self._pick_path is not None:
+                candidates = self._path_point_candidates(self._pick_path, raw)
                 if candidates:
                     selected = self._choose_path_candidate(
-                        self._manual_radius_path,
+                        self._pick_path,
                         candidates,
                         event,
                     )
                     if selected is not None:
-                        self.radius_endpoint_selected.emit(
-                            self._manual_radius_path,
-                            selected,
-                        )
+                        if self._pick_kind == PICK_RADIUS:
+                            self.radius_endpoint_selected.emit(self._pick_path, selected)
+                        else:
+                            self.lane_endpoint_selected.emit(self._pick_path, selected)
                     return
             if self._drawing:
                 snapped = self._snap(raw)
@@ -1140,10 +1182,11 @@ class RouteCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if self._manual_radius_path is not None and event.key() == Qt.Key.Key_Escape:
-            path_name = self._manual_radius_path
-            self.set_manual_radius_mode(None)
-            self.manual_radius_cancelled.emit(path_name)
+        if self._pick_path is not None and event.key() == Qt.Key.Key_Escape:
+            kind = self._pick_kind or PICK_RADIUS
+            path_name = self._pick_path
+            self.set_sample_pick_mode(None)
+            self._emit_pick_cancelled(kind, path_name)
             return
         if self._drawing and event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
             self.finish_lane_drawing()
@@ -1376,7 +1419,9 @@ class RouteCanvas(QGraphicsView):
                         QBrush(QColor("#ffffff")),
                     ).setZValue(8)
                     continue
-                polygon = vehicle_polygon(pose, self._dimensions)
+                polygon = vehicle_polygon(
+                    pose, self._dimensions, visibility.vehicle_section
+                )
                 vehicle_item = self.scene().addPolygon(
                     self._display_polygon(polygon.exterior.coords),
                     self._cosmetic_pen(color, 1),
@@ -1438,12 +1483,12 @@ class RouteCanvas(QGraphicsView):
 
     def _add_manual_radius_graphics(self) -> None:
         """Highlight only the picked endpoints; neighbours stay plain centerline points."""
-        path_name = self._manual_radius_path
-        if path_name is None or not self._manual_radius_endpoints:
+        path_name = self._pick_path
+        if path_name is None or not self._pick_endpoints:
             return
         points = self._paths[path_name]
         source_indices = self._path_source_indices[path_name]
-        for index in sorted(set(self._manual_radius_endpoints)):
+        for index in sorted(set(self._pick_endpoints)):
             if not 0 <= index < len(points):
                 continue
             pose = points[index]
@@ -1452,7 +1497,9 @@ class RouteCanvas(QGraphicsView):
 
     def _add_radius_endpoint_marker(self, display: Point2D, source_index: int) -> None:
         diameter = RADIUS_ENDPOINT_DIAMETER_PX
-        color = QColor(RADIUS_ENDPOINT_COLOR)
+        color = QColor(
+            LANE_ENDPOINT_COLOR if self._pick_kind == PICK_LANE else RADIUS_ENDPOINT_COLOR
+        )
         marker = self.scene().addEllipse(
             QRectF(-diameter / 2, -diameter / 2, diameter, diameter),
             self._cosmetic_pen(color, 2),

@@ -6,7 +6,13 @@ from pytestqt.qtbot import QtBot
 from route_analysis.canvas import RouteCanvas
 from route_analysis.control_panel import ControlPanel
 from route_analysis.geometry import lane_centerline_length
-from route_analysis.models import Lane, Point2D, PosePoint, VehicleDimensions
+from route_analysis.models import (
+    Lane,
+    Point2D,
+    PosePoint,
+    VehicleDimensions,
+    VehicleSection,
+)
 from route_analysis.storage import LaneLayout
 from route_analysis.theme import APPLICATION_STYLESHEET
 from route_analysis.turn_measurements import (
@@ -172,3 +178,67 @@ def test_radius_buttons_emit_their_path_and_manual_mode_changes_label(qtbot: QtB
     with qtbot.waitSignal(panel.manual_radius_requested, timeout=1000) as manual:
         panel.radius_manual_buttons["dispatched"].click()
     assert manual.args == ["dispatched"]
+
+
+def test_vehicle_layer_offers_whole_front_rear_and_off(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    combo = panel.vehicle_combos["dispatched"]
+
+    assert [combo.itemData(row) for row in range(combo.count())] == [
+        "full",
+        "front",
+        "rear",
+        "off",
+    ]
+    assert combo.currentData() == "full"
+    assert canvas._visibility["dispatched"].vehicle_section is VehicleSection.FULL
+    assert canvas._visibility["dispatched"].vehicles is True
+
+
+def test_choosing_one_end_keeps_the_layer_on_and_only_changes_the_section(
+    qtbot: QtBot,
+) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    combo = panel.vehicle_combos["actual"]
+
+    combo.setCurrentIndex(combo.findData("rear"))
+
+    assert canvas._visibility["actual"].vehicles is True
+    assert canvas._visibility["actual"].vehicle_section is VehicleSection.REAR
+    assert canvas._visibility["dispatched"].vehicle_section is VehicleSection.FULL
+
+
+def test_turning_the_vehicle_layer_off_leaves_the_section_alone(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    combo = panel.vehicle_combos["dispatched"]
+
+    combo.setCurrentIndex(combo.findData("front"))
+    combo.setCurrentIndex(combo.findData("off"))
+
+    assert canvas._visibility["dispatched"].vehicles is False
+    assert canvas._visibility["dispatched"].vehicle_section is VehicleSection.FRONT
+
+
+def test_isolating_a_path_remembers_which_end_was_being_looked_at(qtbot: QtBot) -> None:
+    canvas = RouteCanvas()
+    panel = ControlPanel(canvas)
+    qtbot.addWidget(canvas)
+    qtbot.addWidget(panel)
+    dispatched = panel.vehicle_combos["dispatched"]
+    dispatched.setCurrentIndex(dispatched.findData("rear"))
+
+    panel._isolate("actual")
+    assert dispatched.currentData() == "off"
+
+    panel._isolate(None)
+    assert dispatched.currentData() == "rear"
+    assert canvas._visibility["dispatched"].vehicle_section is VehicleSection.REAR

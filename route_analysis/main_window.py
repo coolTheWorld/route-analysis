@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -45,12 +47,29 @@ from route_analysis.api_client import (
     SchedulerClient,
     TaskRecord,
 )
-from route_analysis.auto_lane_dialog import log_auto_lane_selection, run_auto_lane_dialog
+from route_analysis.auto_lane_dialog import (
+    LanePickRequest,
+    log_auto_lane_selection,
+    run_auto_lane_dialog,
+)
 from route_analysis.canvas import RouteCanvas
+from route_analysis.clearance_panel import (
+    ClearanceInputs,
+    ClearancePanel,
+    build_suggestions,
+    offset_rows,
+)
+from route_analysis.clearance_report import (
+    CornerReport,
+    ReportContext,
+    export_offsets_csv,
+    export_report_pdf,
+)
+from route_analysis.clearance_solver import ClearanceAnalysis, LaneContext, analyse_clearance
 from route_analysis.control_panel import ControlPanel
 from route_analysis.errors import RouteAnalysisError, StorageError
 from route_analysis.geometry import build_traversable_area
-from route_analysis.lane_generation import BendMode
+from route_analysis.lane_generation import BendMode, ConnectionMode
 from route_analysis.logging_setup import LoggingManager, LoggingState, log_event
 from route_analysis.logging_ui import add_log_menu
 from route_analysis.models import (
@@ -60,6 +79,7 @@ from route_analysis.models import (
     VehicleDimensions,
 )
 from route_analysis.path_details_panel import PathDetailsPanel
+from route_analysis.scenario_panel import ScenarioPanel
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import (
     ConfigRepository,
@@ -179,6 +199,10 @@ class MainWindow(QMainWindow):
             "dispatched": (),
             "actual": (),
         }
+        self._clearance_generation = 0
+        self._clearance_stale = True
+        self._lane_pick_path: str | None = None
+        self._lane_pick_first: int | None = None
         self._manual_radius_path: str | None = None
         self._manual_radius_start: int | None = None
         self._radius_generations = {"dispatched": 0, "actual": 0}
@@ -236,7 +260,26 @@ class MainWindow(QMainWindow):
         self.canvas.manual_radius_cancelled.connect(
             lambda _path: self._finish_manual_radius()
         )
-        right.addWidget(self.canvas)
+        self.canvas.lane_endpoint_selected.connect(self._lane_endpoint_selected)
+        self.canvas.lane_pick_cancelled.connect(lambda _path: self._finish_lane_pick())
+        self.canvas_tabs = QTabWidget()
+        self.canvas_tabs.setAccessibleName("地图、通行余量与场景速算")
+        self.canvas_tabs.addTab(self.canvas, "地图")
+        self.clearance_panel = ClearancePanel()
+        self.clearance_panel.pose_selected.connect(self._clearance_pose_selected)
+        self.clearance_panel.map_requested.connect(self._clearance_map_requested)
+        self.clearance_panel.export_csv_requested.connect(self.export_offset_table)
+        self.clearance_panel.export_pdf_requested.connect(self.export_clearance_report)
+        self.canvas_tabs.addTab(self.clearance_panel, "通行余量")
+        self.scenario_panel = ScenarioPanel()
+        default_vehicle = self.config.default_vehicle
+        if default_vehicle is not None:
+            self.scenario_panel.set_vehicle_defaults(
+                default_vehicle, self.config.analysis.clearance_threshold
+            )
+        self.canvas_tabs.addTab(self.scenario_panel, "场景速算")
+        self.canvas_tabs.currentChanged.connect(self._canvas_tab_changed)
+        right.addWidget(self.canvas_tabs)
         right.addWidget(self.control_panel)
         right.setStretchFactor(0, 1)
         root_splitter.addWidget(right)
@@ -366,30 +409,87 @@ class MainWindow(QMainWindow):
         )
 
     def open_auto_lane_dialog(self) -> None:
+        """Start, or stop, picking the two samples the new lane has to span."""
+
+        if self._lane_pick_path is not None:
+            self._finish_lane_pick()
+            return
         if self.config.default_lane_width is None:
             self._show_error("请先在设置中填写新车道默认总宽")
             return
-        if len(self._dispatched_path) < 2 and len(self._actual_path) < 2:
-            self._show_error("当前命令没有可用于生成车道的路径坐标")
+        path_name = self.path_details.current_path_name
+        if len(self._path_for(path_name)) < 2:
+            label = "下发路径" if path_name == "dispatched" else "实际执行路径"
+            self._show_error(f"当前命令的{label}没有可用于生成车道的坐标点")
             return
+        self._lane_pick_path = path_name
+        self._lane_pick_first = None
+        self.canvas.set_lane_pick_mode(path_name)
+        self.control_panel.set_lane_pick_mode(True)
+        self.status_label.setText("请在路径上选择第一个点位；按 Esc 退出")
+
+    def _finish_lane_pick(self) -> None:
+        self._lane_pick_path = None
+        self._lane_pick_first = None
+        self.control_panel.set_lane_pick_mode(False)
+        if self.canvas.sample_pick_kind == "lane":
+            self.canvas.set_sample_pick_mode(None)
+
+    def _lane_endpoint_selected(self, path_name: str, index: int) -> None:
+        if self._lane_pick_path != path_name:
+            return
+        if self._lane_pick_first is None:
+            self._lane_pick_first = index
+            self.canvas.set_sample_pick_endpoints((index,))
+            self.status_label.setText(
+                f"已选第一个点位 {self._sample_label(path_name, index)}；请选择第二个点位"
+            )
+            return
+        if index == self._lane_pick_first:
+            # A misclick on the sample already chosen is routine; a modal box for it is not.
+            self.status_label.setText("两个点位不能是同一个样本；请另选第二个点位")
+            return
+        first = self._lane_pick_first
+        self.canvas.set_sample_pick_endpoints((first, index))
+        self._generate_lane_between(path_name, first, index)
+
+    def _generate_lane_between(self, path_name: str, first: int, second: int) -> None:
+        if self.config.default_lane_width is None:
+            return
+        poses = self._path_for(path_name)
+        try:
+            dimensions = self._dimensions_for(self._displayed_path_vin or "")
+        except ValueError:
+            self._show_error("请先在设置中填写车辆尺寸")
+            return
+        start, end = sorted((first, second))
+        request = LanePickRequest(
+            source=path_name,
+            poses=poses,
+            start_index=start,
+            end_index=end,
+            start_label=self._sample_label(path_name, start),
+            end_label=self._sample_label(path_name, end),
+            dimensions=dimensions,
+        )
         selection = run_auto_lane_dialog(
             self,
-            {
-                "dispatched": self._dispatched_path,
-                "actual": self._actual_path,
-            },
+            request,
             default_width=self.config.default_lane_width,
             maximum_deviation=self.config.analysis.lane_generation_deviation,
             last_mode=BendMode(self.config.lane_generation_mode),
+            last_connection=ConnectionMode(self.config.lane_connection),
             preview_callback=lambda result: self.canvas.set_lane_preview(
                 None if result is None else result.lane
             ),
         )
+        self._lane_pick_first = None
+        self.canvas.set_sample_pick_endpoints(())
         if selection is None:
+            self.status_label.setText("已取消；请重新选择第一个点位")
             return
 
         result = selection.generation
-        selected_source = selection.source
         new_config = replace(
             self.config,
             analysis=replace(
@@ -397,6 +497,7 @@ class MainWindow(QMainWindow):
                 lane_generation_deviation=selection.maximum_deviation,
             ),
             lane_generation_mode=selection.mode,
+            lane_connection=selection.connection,
         )
         try:
             self._config_repository.save(new_config)
@@ -407,12 +508,11 @@ class MainWindow(QMainWindow):
         self.canvas.add_generated_lane(result.lane)
         metrics = result.metrics
         self.status_label.setText(
-            f"已新增车道：{result.lane.name}；最大偏差 {metrics.maximum_deviation:.6f} m"
+            f"已新增车道：{result.lane.name}；两端延伸 "
+            f"{metrics.start_overhang:.2f} m / {metrics.end_overhang:.2f} m；"
+            "请选择第一个点位或点「结束选点」"
         )
-        source_path = (
-            self._dispatched_path if selected_source == "dispatched" else self._actual_path
-        )
-        log_auto_lane_selection(selection, source_path)
+        log_auto_lane_selection(selection, poses)
 
     def _search_orders(self) -> None:
         if self._navigation_level != "orders":
@@ -1212,11 +1312,193 @@ class MainWindow(QMainWindow):
                 dispatched_clearance=dispatched_result,
                 actual_clearance=actual_result,
             )
+            self._clearance_stale = True
+            self._refresh_clearance()
 
         worker.signals.succeeded.connect(show)
         worker.signals.failed.connect(self._show_error)
         worker.signals.finished.connect(lambda: self._workers.discard(worker))
         self._analysis_pool.start(worker)
+
+    def _canvas_tab_changed(self, index: int) -> None:
+        if index == 1:
+            self._refresh_clearance()
+
+    def _clearance_visible(self) -> bool:
+        return self.canvas_tabs.currentIndex() == 1
+
+    def _refresh_clearance(self) -> None:
+        """Solve the offset headroom, but only while its tab is the one being looked at.
+
+        The band search costs far more than the clearance pass it follows, so paying for
+        it on every lane edit would make editing crawl for a view nobody is watching.
+        """
+
+        if not self._clearance_visible() or not self._clearance_stale:
+            return
+        if self._displayed_path_vin is None or self._lane_key is None:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        vin = self._displayed_path_vin
+        try:
+            dimensions = self._dimensions_for(vin)
+        except ValueError:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        dispatched = self._dispatched_path
+        if len(dispatched) < 2:
+            self.clearance_panel.set_analysis(None, None)
+            return
+        lanes = list(self.canvas.current_layout().lanes)
+        settings = self.config.analysis
+        labels = tuple(
+            self._sample_label("dispatched", index) for index in range(len(dispatched))
+        )
+        self._clearance_stale = False
+        self._clearance_generation += 1
+        generation = self._clearance_generation
+        self.status_label.setText("正在求解通行余量…")
+
+        def operation() -> tuple[ClearanceAnalysis | None, LaneContext]:
+            context = LaneContext(lanes, settings)
+            return (
+                analyse_clearance(
+                    dispatched, dimensions, lanes, settings, sample_labels=labels
+                ),
+                context,
+            )
+
+        worker: Worker[object] = Worker(operation)
+        self._workers.add(worker)
+
+        def show(result: object) -> None:
+            if generation != self._clearance_generation:
+                return
+            analysis, context = cast(
+                tuple[ClearanceAnalysis | None, LaneContext], result
+            )
+            inputs = (
+                ClearanceInputs(
+                    poses=tuple(dispatched),
+                    dimensions=dimensions,
+                    settings=settings,
+                    context=context,
+                    metadata=self._clearance_metadata(vin),
+                )
+                if analysis is not None
+                else None
+            )
+            self.clearance_panel.set_analysis(analysis, inputs)
+            self.status_label.setText(
+                "就绪" if analysis is not None else "当前命令没有可分析的通行余量"
+            )
+
+        worker.signals.succeeded.connect(show)
+        worker.signals.failed.connect(self._show_error)
+        worker.signals.finished.connect(lambda: self._workers.discard(worker))
+        self._analysis_pool.start(worker)
+
+    def _clearance_metadata(self, vin: str) -> dict[str, str]:
+        dimensions = self._dimensions_for(vin)
+        settings = self.config.analysis
+        return {
+            "order": str(self._current_order.id) if self._current_order else "",
+            "task": str(self._current_task.id) if self._current_task else "",
+            "command": str(self._current_command.id) if self._current_command else "",
+            "vin": vin,
+            "vehicle": (
+                f"宽 {dimensions.width:.2f} / 前 {dimensions.center_front:.2f} / "
+                f"后 {dimensions.center_rear:.2f} m"
+            ),
+            "vehicle_source": self._dimensions_source(vin),
+            "lane_layout": self._lane_key[1] if self._lane_key else "",
+            "steps": (
+                f"位置 {settings.position_step:.2f} m · 航向 {settings.yaw_step:.2f} rad"
+            ),
+        }
+
+    def _locate_dispatched_pose(self, pose_index: int) -> int | None:
+        """Point the canvas and the point table at one dispatched pose, staying put."""
+
+        indices = self._path_documents["dispatched"].pose_source_indices
+        if not 0 <= pose_index < len(indices):
+            return None
+        source_index = indices[pose_index]
+        self.path_details.select_point("dispatched", source_index, emit_signal=False)
+        self._path_detail_selected("dispatched", source_index)
+        return source_index
+
+    def _clearance_pose_selected(self, pose_index: int) -> None:
+        """Selecting a bottleneck positions the map but must not navigate away from it.
+
+        The row's own payload is the width ruler that opens underneath it; switching tabs
+        here would throw the reader off the page that the click just filled in.
+        """
+
+        source_index = self._locate_dispatched_pose(pose_index)
+        if source_index is not None:
+            self.status_label.setText(
+                f"已在地图中定位到点位 {source_index + 1}；切到「地图」标签页查看"
+            )
+
+    def _clearance_map_requested(self, pose_index: int) -> None:
+        if self._locate_dispatched_pose(pose_index) is not None:
+            self.canvas_tabs.setCurrentIndex(0)
+
+    def export_offset_table(self) -> None:
+        analysis = self.clearance_panel.analysis
+        if analysis is None:
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出偏置表", "clearance-offsets.csv", "CSV (*.csv)"
+        )
+        if not filename:
+            return
+        try:
+            export_offsets_csv(Path(filename), offset_rows(analysis))
+        except OSError as exc:
+            self._show_error(f"导出偏置表失败：{exc}")
+            return
+        self.status_label.setText(f"偏置表已导出到 {filename}")
+
+    def export_clearance_report(self) -> None:
+        analysis = self.clearance_panel.analysis
+        inputs = self.clearance_panel.inputs
+        if analysis is None or inputs is None:
+            return
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        command = inputs.metadata.get("command") or "command"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出通行余量报告", f"clearance-{command}-{stamp}.pdf", "PDF (*.pdf)"
+        )
+        if not filename:
+            return
+        context = ReportContext(
+            report_id=f"{command}-{stamp}",
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            order=inputs.metadata.get("order", ""),
+            task=inputs.metadata.get("task", ""),
+            command=command,
+            vehicle=inputs.metadata.get("vehicle", ""),
+            vehicle_source=inputs.metadata.get("vehicle_source", ""),
+            lane_layout=inputs.metadata.get("lane_layout", ""),
+            steps=inputs.metadata.get("steps", ""),
+            samples=f"{analysis.analyzed_samples} 个",
+        )
+        corner = self.clearance_panel.corner_report()
+        try:
+            pages = export_report_pdf(
+                Path(filename),
+                analysis,
+                context,
+                build_suggestions(analysis),
+                zones=self.clearance_panel.selected_zones(),
+                corner=corner if isinstance(corner, CornerReport) else None,
+            )
+        except (OSError, ValueError) as exc:
+            self._show_error(f"导出报告失败：{exc}")
+            return
+        self.status_label.setText(f"报告（{pages} 页）已导出到 {filename}")
 
     def save_lanes(self) -> bool:
         if self._lane_key is None:
