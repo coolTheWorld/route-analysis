@@ -101,7 +101,7 @@ GitHub 仓库检索 `forklift`（1969 命中）返回的全部是同名的运维
 
 **能直接拿的，只有 `swept-core` 一处，而且要付出代价。** 本仓库是 Apache-2.0（已读 LICENSE）。AGPL-3.0-only 的 `swept-solver` 与 Web 界面不能并入；GPL-3.0 的 QgisSweptPath 同理；LGPL-2.1 的 freecad.turns 理论上可动态链接，但它是 FreeCAD 工作台，形态上不可能嵌进来。剩下许可证干净的是 `swept-core`（MIT OR Apache-2.0）、PythonRobotics（MIT）、schlepp（MIT）、CommonRoad DC（BSD-3-Clause）。其中 `swept-core` 是 Rust，要用就得引入 cargo 工具链与 PyO3/WASM 边界，对一个靠 PyInstaller 打包、依赖只有 numpy/PySide6/requests/shapely 的桌面应用是净负担；CommonRoad DC 从源码构建要拖进 Eigen3/Boost/Box2D/FCL/libccd/GPC，更不必谈。**结论是不引入任何一个**，需要时读源码移植闭式公式即可 —— Dubins 与 Reeds–Shepp 的闭式在 PythonRobotics 里是纯 Python，移植成本几乎为零。
 
-**值得抄的三条做法。** 其一是 `swept-path` 把"证明出来的"与"搜索没搜到"分开报告（`Confidence` 随每个结果一起返回，穷举失败意味着"这张网格上不存在"，启发式失败什么也不意味着）。本页 `ForwardSolution` 在无解时只给 `ceiling_clearance`，含义是"阈值要降到多少才有答案"，方向是对的，但没有把"粗扫没扫到"与"真的不可行"区分开 —— `_minimal_feasible` 的粗扫网格只有 11 个点，扫空返回 `None`，这时候报出去的"不可行"其实弱于它听起来的样子。其二是把凑出来的常数明标为 `ARBITRARY` 并写清出处；本项目的 `CAP_PAD`、`SCAN_SAMPLES`、`BISECTION_STEPS` 一类可以照办。其三是 `data/vehicles.json` 里逐字段记录数据来源（实测 / 推导 / 估计），理由是"三厘米的误差就会翻转结论"—— 这条对本页的默认车辆参数同样成立。
+**值得抄的三条做法。** 其一是 `swept-path` 把"证明出来的"与"搜索没搜到"分开报告（`Confidence` 随每个结果一起返回，穷举失败意味着"这张网格上不存在"，启发式失败什么也不意味着）。本页 `ForwardSolution` 在无解时只给 `ceiling_clearance`，含义是"阈值要降到多少才有答案"，方向是对的，但没有把"搜索没搜到"与"真的不可行"区分开 —— `solve_forward` 只在全部尺寸取搜索上界仍不可行时才报无解，这时候报出去的"不可行"其实弱于它听起来的样子（同一类含糊此前还以另一种面目出现过：`_shrink_wrap` 之前的逐项压缩会把某一项顶在搜索上界上，却仍作为"已求解"报出，见 ADR 0008）。其二是把凑出来的常数明标为 `ARBITRARY` 并写清出处；本项目的 `CAP_PAD`、`SHRINK_START_FRACTION`、`SHRINK_LEVELS` 一类可以照办（后两个已照办）。其三是 `data/vehicles.json` 里逐字段记录数据来源（实测 / 推导 / 估计），理由是"三厘米的误差就会翻转结论"—— 这条对本页的默认车辆参数同样成立。
 
 **值得跟踪的只有一个仓库。** `FabienD/swept-path` 是本领域里唯一一个把"参数化场景 + 净距 + 反解"三件事凑齐的活跃项目，虽然目前只有 2 star、建库两周。如果它把场景从"一个大门"泛化成"一族路口"，就会变成真正的同类。
 
