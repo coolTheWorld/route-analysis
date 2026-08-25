@@ -860,6 +860,12 @@ class ManeuverTrace:
     breached: np.ndarray
     x: np.ndarray
     y: np.ndarray
+    ux: np.ndarray
+    uy: np.ndarray
+    """Travel direction per pose. The heading follows it in D and opposes it in R, which is
+
+    what lets a drawing tell the nose end from the tail end rather than the leading end.
+    """
 
 
 def trace_maneuvers(
@@ -884,6 +890,8 @@ def trace_maneuvers(
                 breached=~covered,
                 x=samples.x,
                 y=samples.y,
+                ux=samples.ux,
+                uy=samples.uy,
             )
         )
     return tuple(traces)
