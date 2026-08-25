@@ -44,7 +44,7 @@ SCENARIO_NAMES: dict[Scenario, str] = {
 SCENARIO_SUBTITLES: dict[Scenario, str] = {
     Scenario.CORNER: "L 口 / T 口",
     Scenario.CROSSBACK: "倒车穿越再转出",
-    Scenario.STUBBACK: "借支路掉头",
+    Scenario.STUBBACK: "自支路倒车汇入",
     Scenario.UTURN: "端头掉头",
 }
 
@@ -392,14 +392,12 @@ def _stubback(
     )
     reach = length + 0.8
     primitives = (
-        Line((sx - radius - reach, ry), (sx + radius, ry), Gear.DRIVE),
-        Arc((sx + radius, ry - radius), radius, math.pi / 2, math.pi, Gear.REVERSE),
-        Arc((sx - radius, ry - radius), radius, 0.0, math.pi / 2, Gear.DRIVE),
-        Line((sx - radius, ry), (sx - radius - reach, ry), Gear.DRIVE),
+        Arc((sx + radius, ry - radius), radius, math.pi, math.pi / 2, Gear.REVERSE),
+        Line((sx + radius, ry), (sx - radius - reach, ry), Gear.DRIVE),
     )
-    maneuvers = [Maneuver("自西进入", primitives)]
+    maneuvers = [Maneuver("向西驶出", primitives)]
     if inputs.bidirectional:
-        maneuvers.append(Maneuver("自东进入", _mirror(primitives)))
+        maneuvers.append(Maneuver("向东驶出", _mirror(primitives)))
     return ScenarioLayout(
         region=region,
         maneuvers=tuple(maneuvers),

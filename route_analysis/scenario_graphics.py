@@ -10,12 +10,14 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPolygonF
 
 from route_analysis import theme
 from route_analysis.clearance_graphics import _font, _pen, _text, _tinted, format_length
+from route_analysis.models import VehicleDimensions
 from route_analysis.scenario_geometry import (
     Arc,
     Line,
@@ -28,9 +30,26 @@ from route_analysis.scenario_solver import ManeuverTrace, ScenarioResult, trace_
 SCENE_MARGIN = 1.05
 GRID_STEP = 0.5
 ENVELOPE_RECTS = 52
+DIRECTION_MARKS = 7
+ARROW_PIXELS = 7.0
 VIOLATION_RECTS = 16
 LEGEND_HEIGHT = 18.0
 LABEL_PADDING = 3.0
+
+
+class BodySection(StrEnum):
+    """Which half of the body the swept envelope draws, split at the front-axle centre."""
+
+    WHOLE = "whole"
+    FRONT = "front"
+    REAR = "rear"
+
+
+SECTION_CAPTIONS: dict[BodySection, str] = {
+    BodySection.WHOLE: "整车",
+    BodySection.FRONT: "仅前段",
+    BodySection.REAR: "仅后段",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +57,7 @@ class PlanLayers:
     envelope: bool = True
     dimensions: bool = True
     grid: bool = True
+    section: BodySection = BodySection.WHOLE
 
 
 DEFAULT_LAYERS = PlanLayers()
@@ -105,15 +125,64 @@ def _draw_region(
         painter.drawLine(transform.point(*start), transform.point(*end))
 
 
+def _body_axes(trace: ManeuverTrace, index: int) -> tuple[float, float, float, float]:
+    """Heading and its left normal. R drives the body backwards, so the nose opposes travel."""
+
+    ux, uy = float(trace.ux[index]), float(trace.uy[index])
+    if not bool(trace.gear_is_drive[index]):
+        ux, uy = -ux, -uy
+    return ux, uy, -uy, ux
+
+
+def _section_polygon(
+    trace: ManeuverTrace,
+    index: int,
+    vehicle: VehicleDimensions,
+    section: BodySection,
+) -> list[tuple[float, float]]:
+    """The body rectangle trimmed to one side of the front-axle centre."""
+
+    hx, hy, nx, ny = _body_axes(trace, index)
+    x, y = float(trace.x[index]), float(trace.y[index])
+    back = 0.0 if section is BodySection.FRONT else -vehicle.center_rear
+    front = 0.0 if section is BodySection.REAR else vehicle.center_front
+    half = vehicle.width / 2
+    return [
+        (x + front * hx + half * nx, y + front * hy + half * ny),
+        (x + front * hx - half * nx, y + front * hy - half * ny),
+        (x + back * hx - half * nx, y + back * hy - half * ny),
+        (x + back * hx + half * nx, y + back * hy + half * ny),
+    ]
+
+
+def _sections_drawn(section: BodySection) -> tuple[BodySection, ...]:
+    if section is BodySection.WHOLE:
+        return (BodySection.REAR, BodySection.FRONT)
+    return (section,)
+
+
+SECTION_COLOURS: dict[BodySection, str] = {
+    BodySection.FRONT: theme.SECTION_FRONT,
+    BodySection.REAR: theme.SECTION_REAR,
+}
+
+
 def _draw_envelope(
-    painter: QPainter, transform: _Transform, traces: tuple[ManeuverTrace, ...]
+    painter: QPainter,
+    transform: _Transform,
+    traces: tuple[ManeuverTrace, ...],
+    vehicle: VehicleDimensions,
+    section: BodySection,
 ) -> None:
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(_tinted(theme.SWEEP_FILL, 0.15)))
-    for trace in traces:
-        stride = max(1, math.ceil(len(trace.corners) / ENVELOPE_RECTS))
-        for index in range(0, len(trace.corners), stride):
-            painter.drawPolygon(_polygon(transform, trace.corners[index]))
+    for part in _sections_drawn(section):
+        painter.setBrush(QBrush(_tinted(SECTION_COLOURS[part], 0.16)))
+        for trace in traces:
+            stride = max(1, math.ceil(len(trace.corners) / ENVELOPE_RECTS))
+            for index in range(0, len(trace.corners), stride):
+                painter.drawPolygon(
+                    _polygon(transform, _section_polygon(trace, index, vehicle, part))
+                )
     painter.setBrush(Qt.BrushStyle.NoBrush)
 
 
@@ -141,6 +210,65 @@ def _draw_paths(
             painter.drawPath(path)
 
 
+def _draw_direction(
+    painter: QPainter, transform: _Transform, traces: tuple[ManeuverTrace, ...]
+) -> None:
+    """Chevrons along the path, pointing the way the truck actually travels.
+
+    Travel, not heading: on a reverse leg the two are opposite, and which way the body is
+    moving is the thing the path is there to show.
+    """
+
+    for trace in traces:
+        count = len(trace.x)
+        if count < 2:
+            continue
+        stride = max(1, count // (DIRECTION_MARKS + 1))
+        for index in range(stride, count - 1, stride):
+            ux, uy = float(trace.ux[index]), float(trace.uy[index])
+            tip = transform.point(float(trace.x[index]), float(trace.y[index]))
+            painter.setPen(
+                _pen(theme.ACCENT_DEEP, 1.6 if bool(trace.gear_is_drive[index]) else 1.3)
+            )
+            for turn in (2.5, -2.5):
+                wing_x = ux * math.cos(turn) - uy * math.sin(turn)
+                wing_y = ux * math.sin(turn) + uy * math.cos(turn)
+                painter.drawLine(
+                    tip,
+                    QPointF(
+                        tip.x() + wing_x * ARROW_PIXELS,
+                        tip.y() - wing_y * ARROW_PIXELS,
+                    ),
+                )
+
+
+def _draw_endpoints(
+    painter: QPainter, transform: _Transform, traces: tuple[ManeuverTrace, ...]
+) -> None:
+    """Mark where each maneuver begins and ends, so the path reads in the right order."""
+
+    for trace in traces:
+        if not len(trace.x):
+            continue
+        for index, caption, colour in (
+            (0, "起点", theme.SUCCESS_BAR),
+            (len(trace.x) - 1, "终点", theme.DANGER_POINT),
+        ):
+            point = transform.point(float(trace.x[index]), float(trace.y[index]))
+            painter.setPen(_pen(theme.CANVAS_BASE, 2.0))
+            painter.setBrush(QBrush(QColor(colour)))
+            painter.drawEllipse(point, 4.6, 4.6)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            _haloed_text(
+                painter,
+                QPointF(point.x(), point.y() - 13.0),
+                caption,
+                size=9.5,
+                color=colour,
+                bold=True,
+            )
+
+
 def _draw_violations(
     painter: QPainter, transform: _Transform, traces: tuple[ManeuverTrace, ...]
 ) -> None:
@@ -154,6 +282,38 @@ def _draw_violations(
         for index in indices[::stride]:
             painter.drawPolygon(_polygon(transform, trace.corners[index]))
     painter.setBrush(Qt.BrushStyle.NoBrush)
+
+
+def _draw_playhead(
+    painter: QPainter,
+    transform: _Transform,
+    traces: tuple[ManeuverTrace, ...],
+    vehicle: VehicleDimensions,
+    progress: float,
+) -> None:
+    """One body per maneuver at the same fraction along, for the run-through.
+
+    Both halves are drawn in their own colour and outlined, so the run reads against the
+    pale swept envelope underneath rather than disappearing into it. Two-way layouts run
+    both maneuvers together: they are the same drive mirrored, and watching them at once is
+    what shows where the two demands overlap.
+    """
+
+    for trace in traces:
+        count = len(trace.x)
+        if not count:
+            continue
+        index = min(count - 1, max(0, round(progress * (count - 1))))
+        for part in (BodySection.REAR, BodySection.FRONT):
+            painter.setPen(_pen(SECTION_COLOURS[part], 1.6))
+            painter.setBrush(QBrush(_tinted(SECTION_COLOURS[part], 0.45)))
+            painter.drawPolygon(
+                _polygon(transform, _section_polygon(trace, index, vehicle, part))
+            )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        centre = transform.point(float(trace.x[index]), float(trace.y[index]))
+        painter.setPen(_pen(theme.ACCENT_DEEP, 1.4))
+        painter.drawEllipse(centre, 2.6, 2.6)
 
 
 def _primitive_anchor(item: Line | Arc) -> tuple[float, float]:
@@ -386,13 +546,20 @@ def _draw_bottleneck(painter: QPainter, transform: _Transform, result: ScenarioR
 
 LEGEND_ITEMS = (
     ("可通行区域", theme.AREA_STROKE, "block"),
-    ("车辆扫掠范围", theme.SWEEP_FILL, "block"),
+    ("扫掠 前段（中心前距）", theme.SECTION_FRONT, "block"),
+    ("扫掠 后段（中心后距）", theme.SECTION_REAR, "block"),
     ("路径 D档", theme.ACCENT, "solid"),
     ("路径 R档", theme.ACCENT, "dashed"),
+    ("行进方向", theme.ACCENT_DEEP, "solid"),
+    ("起点", theme.SUCCESS_BAR, "dot"),
+    ("终点", theme.DANGER_POINT, "dot"),
     ("道路中心线", theme.TEXT_FAINT, "dashed"),
     ("越界位姿", theme.DANGER, "block"),
-    ("最小净距点", theme.DANGER_POINT, "dot"),
 )
+"""The two section colours are named here because that is the only place the drawing says
+
+which half of the body is which; the plan view itself has no room for it.
+"""
 
 
 def _draw_legend(painter: QPainter, rect: QRectF) -> None:
@@ -433,8 +600,16 @@ def paint_scenario_plan(
     rect: QRectF,
     result: ScenarioResult,
     layers: PlanLayers | None = None,
+    traces: tuple[ManeuverTrace, ...] | None = None,
+    playhead: float | None = None,
 ) -> None:
-    """Draw one estimate as a plan view."""
+    """Draw one estimate as a plan view.
+
+    ``traces`` lets the caller hand in poses it already expanded. Tracing runs the bodies
+    through a shapely containment test, which is far too much to redo on every frame of the
+    run-through, and it only changes when the result does. ``playhead`` is that run-through:
+    a fraction from 0 to 1 placing one body along each maneuver.
+    """
 
     layers = layers or DEFAULT_LAYERS
     painter.save()
@@ -458,11 +633,17 @@ def paint_scenario_plan(
     if layers.grid:
         _draw_grid(painter, plan, transform, bounds)
     _draw_region(painter, transform, layout)
-    traces = trace_maneuvers(layout, result.inputs.dimensions)
+    if traces is None:
+        traces = trace_maneuvers(layout, result.inputs.dimensions)
+    vehicle = result.inputs.dimensions
     if layers.envelope:
-        _draw_envelope(painter, transform, traces)
+        _draw_envelope(painter, transform, traces, vehicle, layers.section)
     _draw_paths(painter, transform, traces)
+    _draw_direction(painter, transform, traces)
     _draw_violations(painter, transform, traces)
+    if playhead is not None:
+        _draw_playhead(painter, transform, traces, vehicle, playhead)
+    _draw_endpoints(painter, transform, traces)
     if layers.dimensions:
         _draw_annotations(painter, transform, result)
         for x, y, message in _gear_pills(layout):
