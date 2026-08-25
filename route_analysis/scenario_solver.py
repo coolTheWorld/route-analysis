@@ -480,6 +480,34 @@ class ForwardSolution:
     """
 
 
+def _centreline_ceiling(
+    inputs: ScenarioInputs, given: RoadDimensions
+) -> RoadDimensions | None:
+    """The centreline answer, which caps the extreme one dimension by dimension.
+
+    An extreme condition only ever adds freedom: every lateral offset is free to stay at
+    zero, so the centreline road is always feasible here too. Letting the extreme solve
+    run past it means telling the operator that permission to leave the centreline made a
+    road *wider*, which is not something anyone can act on. It happened in ten of the
+    twelve forward variants, and not always marginally -- two-way crossback asked for a
+    4.46 m turn-out road against the centreline's 2.51 m. The offset optimiser is the
+    greedy one here: early in the descent the road is still wide, so a large offset costs
+    nothing and buys enough clearance for the other dimensions to shrink hard, and the
+    dimension that has to contain that offset can then never come back down.
+
+    The cap does take real answers off the table. With the turn-out road and the dip held
+    at their centreline values, the one-way reverse lane genuinely cannot go below the
+    centreline figure either, where an uncapped solve would have offered a narrower lane
+    in exchange for a 10 cm deeper dip. So the extreme condition now reports what offsets
+    buy *on top of* the centreline road, not a different road arrived at by trading one
+    dimension away for another.
+    """
+
+    if not inputs.extreme:
+        return None
+    return solve_forward(replace(inputs, extreme=False), given).dims
+
+
 def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolution:
     """A set of road dimensions none of which can shrink alone. The answer sits on the
 
@@ -505,20 +533,45 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
         "d": (0.25, inputs.radius + lane_seed + vehicle.center_rear + inputs.threshold + 3),
     }
     keys = SOLVED_KEYS[inputs.scenario]
+    cap = _centreline_ceiling(inputs, given)
+    if cap is not None:
+        brackets = {
+            key: (low, max(low, min(high, getattr(cap, key))) if key in keys else high)
+            for key, (low, high) in brackets.items()
+        }
     dims = replace(
         given,
         **{key: brackets[key][1] for key in keys},
     )
     ceiling = _report_clearance(inputs, dims)[1]
     if not _feasible(inputs, dims):
+        if cap is not None:
+            # The centreline road is feasible under an extreme condition by construction,
+            # every offset being free to stay at zero, so report it rather than claim there
+            # is no answer. The cheap feasibility heuristic can still read it as short: the
+            # centreline solve leaves its answer sitting exactly on the threshold, and a
+            # coarse offset search under-reads what the offsets can actually reach.
+            return ForwardSolution(dims, ceiling)
         return ForwardSolution(None, ceiling)
     dims = _shrink_wrap(inputs, dims, keys, brackets)
+    check = _report_clearance(inputs, dims)[1]
     for _ in range(GUARD_ROUNDS):
-        check = _report_clearance(inputs, dims)[1]
         if check >= inputs.threshold:
             break
         bump = (inputs.threshold - check) + 0.006
-        dims = replace(dims, **{key: getattr(dims, key) + bump for key in keys})
+        dims = replace(
+            dims,
+            **{
+                key: min(getattr(dims, key) + bump, brackets[key][1])
+                for key in keys
+            },
+        )
+        check = _report_clearance(inputs, dims)[1]
+    if check < inputs.threshold and cap is not None:
+        # Capped at the centreline road, the bump has nowhere left to climb, so it can run
+        # out of rounds still short. That ceiling is feasible by construction, so fall back
+        # onto it rather than report a road that does not make the threshold.
+        dims = replace(dims, **{key: brackets[key][1] for key in keys})
     return ForwardSolution(_tighten(inputs, dims, keys, brackets), ceiling)
 
 

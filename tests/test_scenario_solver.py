@@ -429,3 +429,34 @@ def test_two_way_crossback_does_not_trade_the_whole_road_for_the_dip():
     assert two_way.wh == pytest.approx(one_way.wh, abs=2e-3)
     assert two_way.ls == pytest.approx(one_way.ls, abs=2e-3)
     assert two_way.wv == pytest.approx(one_way.wv, abs=2e-3)
+
+
+@pytest.mark.parametrize("bidirectional", [False, True])
+@pytest.mark.parametrize("scenario", list(Scenario))
+def test_letting_the_truck_leave_the_centreline_never_widens_the_road(
+    scenario, bidirectional
+):
+    """An extreme condition only adds freedom, so no dimension may come out larger.
+
+    Every offset is free to stay at zero, which makes the centreline road feasible under
+    the extreme condition too. Reporting a wider one says permission to leave the
+    centreline forced a bigger road, which nobody can act on. Ten of the twelve variants
+    used to do it -- two-way crossback asked 4.46 m of turn-out road against 2.51 m --
+    because the offset optimiser takes a large offset early, while the road is still wide
+    enough to make it free, and whichever dimension has to contain that offset is then
+    stuck holding it.
+    """
+
+    solved = {}
+    for extreme in (False, True):
+        inputs = _inputs(
+            scenario=scenario, bidirectional=bidirectional, extreme=extreme,
+            mode=SolveMode.FORWARD,
+        )
+        result = solve_scenario(inputs, RoadDimensions())
+        assert not result.infeasible, (scenario, bidirectional, extreme)
+        solved[extreme] = result.dims
+    for key in SOLVED_KEYS[scenario]:
+        assert getattr(solved[True], key) <= getattr(solved[False], key) + 2e-3, (
+            key, solved[False], solved[True]
+        )
