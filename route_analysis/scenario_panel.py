@@ -505,6 +505,16 @@ class ScenarioPanel(QWidget):
             spin = self._vehicle_spins[key]
             spin.valueChanged.connect(self._vehicle_changed)
             self._labelled(layout, caption, spin)
+            if key == "rear":
+                # Sits under the two dimensions it splits on, not up in the plan header:
+                # three CJK segments alongside the run button and the layer toggles left
+                # every caption elided to an ellipsis and ate the title as well.
+                self._section_segment = _Segment(
+                    tuple((section, SECTION_CAPTIONS[section]) for section in BodySection)
+                )
+                self._section_segment.changed.connect(self._section_changed)
+                self._section_segment.select(BodySection.WHOLE)
+                self._stacked(layout, "扫掠包络分段", self._section_segment)
         note = QLabel(
             "坐标按叉车前轴中心解释。转弯半径默认 1.20 m 为经验值，请按车型核实。"
         )
@@ -542,15 +552,21 @@ class ScenarioPanel(QWidget):
         column = QVBoxLayout(holder)
         column.setContentsMargins(12, 10, 12, 12)
         column.setSpacing(8)
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # Title on its own row. Variant names run to about 350 px and the controls want
+        # another 290; sharing one row left both elided, the buttons down to a bare "…".
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         self._title = QLabel()
         self._title.setObjectName("scenarioTitle")
-        header.addWidget(self._title)
+        self._title.setWordWrap(True)
+        title_row.addWidget(self._title, 1)
         self._busy = QLabel("计算中…")
         self._busy.setObjectName("scenarioHint")
         self._busy.hide()
-        header.addWidget(self._busy)
+        title_row.addWidget(self._busy)
+        column.addLayout(title_row)
+        header = QHBoxLayout()
+        header.setSpacing(8)
         header.addStretch(1)
         self._run_button = QToolButton()
         self._run_button.setObjectName("scenarioSegment")
@@ -558,12 +574,6 @@ class ScenarioPanel(QWidget):
         self._run_button.setToolTip("车体包络自起点沿路径跑到终点")
         self._run_button.clicked.connect(self._toggle_run)
         header.addWidget(self._run_button)
-        self._section_segment = _Segment(
-            tuple((section, SECTION_CAPTIONS[section]) for section in BodySection)
-        )
-        self._section_segment.changed.connect(self._section_changed)
-        self._section_segment.select(BodySection.WHOLE)
-        header.addWidget(self._section_segment)
         self._layer_buttons: dict[str, QToolButton] = {}
         for key, caption in (
             ("envelope", "扫掠包络"),

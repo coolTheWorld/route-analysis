@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtWidgets import QGroupBox
 from pytestqt.qtbot import QtBot
 
 from route_analysis import theme
@@ -15,7 +16,12 @@ from route_analysis.scenario_graphics import (
     LEGEND_ROW,
     BodySection,
 )
-from route_analysis.scenario_panel import RUN_CAPTION, ScenarioPanel
+from route_analysis.scenario_panel import (
+    RESULT_WIDTH,
+    RUN_CAPTION,
+    SIDEBAR_WIDTH,
+    ScenarioPanel,
+)
 
 SOLVE_TIMEOUT_MS = 30_000
 """Forward solves in the heaviest variants run past a second on a busy machine."""
@@ -252,3 +258,38 @@ def test_the_legend_never_silently_drops_an_entry() -> None:
             placed += 1
             x += span
         assert placed == len(LEGEND_ITEMS), (width, placed, len(LEGEND_ITEMS))
+
+
+def test_the_plan_header_controls_fit_without_eliding(qtbot: QtBot) -> None:
+    """The controls must fit the plan column, or QToolButton quietly elides them to "…".
+
+    Measured at full-width CJK metrics rather than through QFontMetrics: a machine with no
+    CJK font reports box glyphs and says everything fits when it does not. Three body
+    section buttons used to sit here too, which pushed the row past the column and elided
+    the captions and the title together.
+    """
+
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    captions = [panel._run_button.text()] + [
+        button.text() for button in panel._layer_buttons.values()
+    ]
+    need = sum(_cjk_advance(text, 11.0) + 18.0 for text in captions) + 8.0 * (
+        len(captions) + 1
+    )
+    column = panel.width() - SIDEBAR_WIDTH - RESULT_WIDTH - 24
+    assert need <= column, (need, column, captions)
+
+
+def test_the_body_section_picker_sits_with_the_dimensions_it_splits_on(
+    qtbot: QtBot,
+) -> None:
+    """It belongs beside 中心前距 / 中心后距, not in the plan header it used to overflow."""
+
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    owner = panel._section_segment.parent()
+    while owner is not None and not isinstance(owner, QGroupBox):
+        owner = owner.parent()
+    assert isinstance(owner, QGroupBox)
+    assert owner.title() == "车辆参数"
