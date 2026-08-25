@@ -33,7 +33,8 @@ ENVELOPE_RECTS = 52
 DIRECTION_MARKS = 7
 ARROW_PIXELS = 7.0
 VIOLATION_RECTS = 16
-LEGEND_HEIGHT = 18.0
+LEGEND_HEIGHT = 36.0
+LEGEND_ROW = 17.0
 LABEL_PADDING = 3.0
 
 
@@ -555,6 +556,7 @@ LEGEND_ITEMS = (
     ("终点", theme.DANGER_POINT, "dot"),
     ("道路中心线", theme.TEXT_FAINT, "dashed"),
     ("越界位姿", theme.DANGER, "block"),
+    ("最小净距点", theme.DANGER_POINT, "dot"),
 )
 """The two section colours are named here because that is the only place the drawing says
 
@@ -563,11 +565,26 @@ which half of the body is which; the plan view itself has no room for it.
 
 
 def _draw_legend(painter: QPainter, rect: QRectF) -> None:
+    """Wrap onto a second row rather than run off the end.
+
+    This used to walk one row and stop once it ran past the edge, which silently dropped
+    whatever came last. That was survivable at seven entries and is not at eleven: the two
+    section colours mean nothing without the words next to them, and a legend that quietly
+    loses its tail is worse than one that takes an extra row.
+    """
+
     painter.setFont(_font(painter, 10.5))
     metrics = painter.fontMetrics()
     x = rect.left()
-    middle = rect.center().y()
+    row_top = rect.top()
     for message, color, shape in LEGEND_ITEMS:
+        span = 16.0 + metrics.horizontalAdvance(message) + 16.0
+        if x > rect.left() and x + span > rect.right():
+            x = rect.left()
+            row_top += LEGEND_ROW
+            if row_top + LEGEND_ROW > rect.bottom() + 1.0:
+                break
+        middle = row_top + LEGEND_ROW / 2.0
         painter.setBrush(Qt.BrushStyle.NoBrush)
         if shape == "block":
             painter.setPen(Qt.PenStyle.NoPen)
@@ -583,16 +600,13 @@ def _draw_legend(painter: QPainter, rect: QRectF) -> None:
             )
             painter.drawLine(QPointF(x, middle), QPointF(x + 12.0, middle))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        width = metrics.horizontalAdvance(message)
         _text(
             painter,
-            QRectF(x + 16.0, rect.top(), width + 4.0, rect.height()),
+            QRectF(x + 16.0, row_top, span - 16.0, LEGEND_ROW),
             message,
             size=10.5, color=theme.TEXT_MUTED,
         )
-        x += 16.0 + width + 16.0
-        if x > rect.right():
-            break
+        x += span
 
 
 def paint_scenario_plan(
