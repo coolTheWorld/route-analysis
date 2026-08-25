@@ -9,7 +9,12 @@ from route_analysis.scenario_geometry import (
     Scenario,
     SolveMode,
 )
-from route_analysis.scenario_graphics import LEGEND_ITEMS, BodySection
+from route_analysis.scenario_graphics import (
+    LEGEND_HEIGHT,
+    LEGEND_ITEMS,
+    LEGEND_ROW,
+    BodySection,
+)
 from route_analysis.scenario_panel import RUN_CAPTION, ScenarioPanel
 
 SOLVE_TIMEOUT_MS = 30_000
@@ -215,3 +220,35 @@ def test_starting_a_new_solve_abandons_a_run_in_progress(qtbot: QtBot) -> None:
     assert not panel._run_timer.isActive()
     assert panel.plan._playhead is None
     assert panel._run_button.text() == RUN_CAPTION
+
+
+def _cjk_advance(message: str, size: float = 10.5) -> float:
+    """Width at full-width CJK metrics, so the check does not depend on installed fonts.
+
+    Measuring through QFontMetrics on a machine with no CJK font gives narrow box glyphs
+    and reports the legend fitting when it does not.
+    """
+
+    return sum(size if ord(ch) > 0x2E80 else size * 0.55 for ch in message)
+
+
+def test_the_legend_never_silently_drops_an_entry() -> None:
+    """It wraps; it used to walk one row and stop, losing whatever came last.
+
+    Eleven entries at full-width metrics need about 940 px against a plan column nearer
+    640 px, and the two section colours are meaningless without the words beside them.
+    """
+
+    rows = int(LEGEND_HEIGHT // LEGEND_ROW)
+    assert rows >= 2
+    for width in (600.0, 640.0, 900.0):
+        x, row, placed = 0.0, 0, 0
+        for message, _colour, _shape in LEGEND_ITEMS:
+            span = 16.0 + _cjk_advance(message) + 16.0
+            if x > 0.0 and x + span > width:
+                x, row = 0.0, row + 1
+                if row >= rows:
+                    break
+            placed += 1
+            x += span
+        assert placed == len(LEGEND_ITEMS), (width, placed, len(LEGEND_ITEMS))
