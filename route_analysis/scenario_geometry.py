@@ -117,8 +117,8 @@ class ScenarioInputs:
             width=1.23, center_front=1.545, center_rear=2.223
         )
     )
-    radius: float = 1.60
-    threshold: float = 0.05
+    radius: float = 1.20
+    threshold: float = 0.15
 
     @property
     def effective_gear(self) -> Gear:

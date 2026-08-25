@@ -165,6 +165,12 @@ class WidthZones:
     centred_limit: float | None
     scale_low: float
     scale_high: float
+    threshold: float
+    """The clearance threshold the two limits were solved against, so the ruler can say so.
+
+    It used to be drawn as a flat 0.05 m, which was the default at the time and silently
+    wrong for anyone who had configured anything else.
+    """
 
 
 CORNER_NAMES = {
@@ -638,6 +644,7 @@ def solve_width_zones(
         centred_limit=centred_limit,
         scale_low=min(anchors) - span * 0.5,
         scale_high=max(anchors) + span * 0.5,
+        threshold=settings.clearance_threshold,
     )
 
 

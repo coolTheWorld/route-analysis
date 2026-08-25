@@ -111,7 +111,7 @@ class VehicleDimensions:
 class AnalysisSettings:
     position_step: float = 0.05
     yaw_step: float = 0.02
-    clearance_threshold: float = 0.05
+    clearance_threshold: float = 0.15
     bezier_tolerance: float = 0.02
     miter_limit: float = 4.0
     lane_generation_deviation: float = 0.05
