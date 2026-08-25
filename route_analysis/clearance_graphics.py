@@ -471,7 +471,7 @@ def paint_width_ruler(painter: QPainter, rect: QRectF, zones: WidthZones) -> Non
     _text(
         painter,
         QRectF(rect.left() + 12, rect.top() + 2, rect.width() - 24, 16),
-        f"{zones.lane_name}宽度三区 · 阈值 {format_length(0.05)} m",
+        f"{zones.lane_name}宽度三区 · 阈值 {format_length(zones.threshold)} m",
         size=10.5,
         color=theme.TEXT_SECONDARY,
         bold=True,

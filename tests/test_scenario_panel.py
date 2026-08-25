@@ -147,6 +147,7 @@ def test_a_uturn_that_cannot_hold_the_radius_says_so_on_the_card(qtbot: QtBot) -
     panel._mode_changed(SolveMode.CHECK)
     panel._scenario_changed(Scenario.UTURN)
     _settled(qtbot, panel)
+    panel._vehicle_spins["radius"].setValue(1.60)
     panel._road_spins["w"].setValue(1.80)
     panel._road_spins["b"].setValue(0.60)
     result = _settled(qtbot, panel)

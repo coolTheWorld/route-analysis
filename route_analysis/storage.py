@@ -178,7 +178,7 @@ class AppConfig:
                     position_step=_float_value(analysis.get("position_step", 0.05)),
                     yaw_step=_float_value(analysis.get("yaw_step", 0.02)),
                     clearance_threshold=_float_value(
-                        analysis.get("clearance_threshold", 0.05)
+                        analysis.get("clearance_threshold", 0.15)
                     ),
                     bezier_tolerance=_float_value(analysis.get("bezier_tolerance", 0.02)),
                     miter_limit=_float_value(analysis.get("miter_limit", 4.0)),
