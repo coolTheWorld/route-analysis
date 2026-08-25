@@ -458,7 +458,7 @@ class ScenarioPanel(QWidget):
             spin.valueChanged.connect(self._vehicle_changed)
             self._labelled(layout, caption, spin)
         note = QLabel(
-            "坐标按叉车前轴中心解释。转弯半径默认 1.60 m 为经验值，请按车型核实。"
+            "坐标按叉车前轴中心解释。转弯半径默认 1.20 m 为经验值，请按车型核实。"
         )
         note.setObjectName("scenarioHint")
         note.setWordWrap(True)
