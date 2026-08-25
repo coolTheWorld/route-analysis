@@ -3,6 +3,7 @@ import math
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from route_analysis import scenario_geometry
@@ -45,6 +46,22 @@ OFFSET_KEYS = {
 PROTOTYPE_END_WALL = 0.15
 """What the prototype reports when its artificial end wall binds: a fixed 0.15 m trim."""
 
+SUPERSEDED_BY_REQUIREMENT = {Scenario.STUBBACK}
+"""Scenarios whose maneuver no longer matches the prototype the fixture was taken from.
+
+The prototype drove stubback as a U-turn borrowed through the branch -- approach, reverse
+in, pull out the far side -- which the design handoff itself flagged as unconfirmed. The
+requirement owner has since settled it: the truck starts inside the branch nose-south,
+reverses through one quarter turn onto the east side of the trunk, and drives away west.
+Different path, so the prototype's readings are no longer the same question and comparing
+against them would only pin the old shape back in place. The remaining scenarios still
+cross-check case for case.
+"""
+
+
+def _comparable(cases):
+    return [case for case in cases if Scenario(case["type"]) not in SUPERSEDED_BY_REQUIREMENT]
+
 
 def _inputs(**overrides) -> ScenarioInputs:
     base = {"dimensions": DIMENSIONS, "radius": 1.60, "threshold": 0.05}
@@ -66,6 +83,7 @@ def test_geometry_layer_matches_the_prototype_case_for_case(monkeypatch):
 
     monkeypatch.setattr(scenario_geometry, "CAP_PAD", 0.0)
     vehicle, cases = _fixture_cases()
+    cases = _comparable(cases)
     dimensions = VehicleDimensions(
         width=vehicle["W"], center_front=vehicle["Lf"], center_rear=vehicle["Lr"]
     )
@@ -89,7 +107,7 @@ def test_geometry_layer_matches_the_prototype_case_for_case(monkeypatch):
         actual = evaluate(inputs, dims, offsets, steps, detail=True).clearance
         assert actual == pytest.approx(case["clearance"], abs=1e-6), case
         compared += 1
-    assert compared > 200, "对拍用例太少，夹具可能没重新生成"
+    assert compared > 170, "对拍用例太少，夹具可能没重新生成"
 
 
 def test_padded_end_walls_only_ever_loosen_the_result():
@@ -99,6 +117,7 @@ def test_padded_end_walls_only_ever_loosen_the_result():
     dimensions = VehicleDimensions(
         width=vehicle["W"], center_front=vehicle["Lf"], center_rear=vehicle["Lr"]
     )
+    cases = _comparable(cases)
     loosened = 0
     for case in cases:
         inputs = _inputs(
@@ -460,3 +479,36 @@ def test_letting_the_truck_leave_the_centreline_never_widens_the_road(
         assert getattr(solved[True], key) <= getattr(solved[False], key) + 2e-3, (
             key, solved[False], solved[True]
         )
+
+
+def test_stubback_starts_inside_the_branch_and_leaves_along_the_trunk():
+    """The maneuver the requirement owner settled on, pinned end to end.
+
+    Nose south inside the branch, one quarter turn in reverse onto the east side of the
+    trunk, then forward away west. The shape it replaced never left the trunk at all: both
+    of its arcs met on the trunk centreline, so the front axle bottomed out one radius down
+    and only the tail ever swung into the branch.
+    """
+
+    inputs = _inputs(scenario=Scenario.STUBBACK, mode=SolveMode.FORWARD)
+    result = solve_scenario(inputs, RoadDimensions())
+    primitives = result.layout.maneuvers[0].primitives
+    assert [item.gear for item in primitives] == [Gear.REVERSE, Gear.DRIVE]
+
+    samples = sample_poses(primitives, DIMENSIONS, FINE)
+    reach = np.where(samples.gear_is_drive, DIMENSIONS.center_front, -DIMENSIONS.center_front)
+    nose_x, nose_y = samples.x + reach * samples.ux, samples.y + reach * samples.uy
+
+    branch_floor = -result.dims.wh / 2 - result.dims.ls
+    assert nose_y[0] < -result.dims.wh / 2, "起点车头必须已经在支路里"
+    assert nose_y[0] == pytest.approx(samples.y[0] - DIMENSIONS.center_front, abs=1e-6)
+    assert nose_y[0] > branch_floor, "车头不能穿出支路尽头"
+    assert samples.x[0] == pytest.approx(0.0, abs=1e-6), "起点落在支路中线上"
+
+    assert samples.x[-1] < samples.x[0], "驶出方向朝西"
+    assert samples.y[-1] == pytest.approx(0.0, abs=1e-6), "终点回到主路中线"
+    assert nose_x[-1] < samples.x[-1], "终点车头朝西"
+    assert bool(samples.gear_is_drive[-1])
+
+    turned = max(samples.x[: len(samples) // 2])
+    assert turned > 0, "倒车转弯经过主路东侧"

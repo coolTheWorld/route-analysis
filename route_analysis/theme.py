@@ -106,6 +106,13 @@ ACCENT_BORDER = "#4784d5"
 AREA_FILL = "#4f8dd8"
 AREA_STROKE = "#3972b6"
 SWEEP_FILL = "#14395f"
+SECTION_FRONT = "#1f7a8c"
+"""The centre-to-nose half of the body, measured by 中心前距."""
+SECTION_REAR = "#c2683a"
+"""The centre-to-tail half, measured by 中心后距. Split at the front-axle centre, so the
+
+two meet on the reference point the backend coordinates actually name.
+"""
 
 DANGER = "#b4233f"
 DANGER_DEEP = "#a10f2b"

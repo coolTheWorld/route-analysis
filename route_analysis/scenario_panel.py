@@ -50,8 +50,19 @@ from route_analysis.scenario_geometry import (
     dimension_label,
     variant_name,
 )
-from route_analysis.scenario_graphics import PlanLayers, paint_scenario_plan
-from route_analysis.scenario_solver import ScenarioResult, offset_specs, solve_scenario
+from route_analysis.scenario_graphics import (
+    SECTION_CAPTIONS,
+    BodySection,
+    PlanLayers,
+    paint_scenario_plan,
+)
+from route_analysis.scenario_solver import (
+    ManeuverTrace,
+    ScenarioResult,
+    offset_specs,
+    solve_scenario,
+    trace_maneuvers,
+)
 from route_analysis.turn_radius import CornerRadiusKind
 from route_analysis.workers import Worker
 
@@ -59,6 +70,16 @@ SIDEBAR_WIDTH = 290
 RESULT_WIDTH = 314
 LABEL_WIDTH = 84
 DEBOUNCE_MS = 150
+RUN_FRAME_MS = 33
+RUN_CAPTION = "模拟运行"
+RUN_STOP_CAPTION = "停止"
+RUN_SECONDS = 3.4
+"""How long one run-through takes end to end, whatever the path length.
+
+A fixed duration rather than a fixed speed: the point is to read the order the legs
+happen in and where the body swings widest, and a short maneuver crawling through in
+the same seconds as a long one makes that easier to follow, not harder.
+"""
 
 ROAD_KEYS: dict[Scenario, tuple[str, ...]] = {
     Scenario.CORNER: ("wa", "wb"),
@@ -266,14 +287,31 @@ class PlanView(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._result: ScenarioResult | None = None
         self._layers = PlanLayers()
+        self._traces: tuple[ManeuverTrace, ...] = ()
+        self._playhead: float | None = None
 
     def set_result(self, result: ScenarioResult | None) -> None:
         self._result = result
+        self._traces = (
+            trace_maneuvers(result.layout, result.inputs.dimensions)
+            if result is not None
+            else ()
+        )
         self.update()
 
     def set_layers(self, layers: PlanLayers) -> None:
         self._layers = layers
         self.update()
+
+    def set_playhead(self, progress: float | None) -> None:
+        """Where the run-through has got to, or ``None`` when it is not running."""
+
+        self._playhead = progress
+        self.update()
+
+    @property
+    def pose_count(self) -> int:
+        return max((len(trace.x) for trace in self._traces), default=0)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
@@ -281,7 +319,12 @@ class PlanView(QWidget):
             return
         painter = QPainter(self)
         paint_scenario_plan(
-            painter, QRectF(self.rect()).adjusted(1, 1, -1, -1), self._result, self._layers
+            painter,
+            QRectF(self.rect()).adjusted(1, 1, -1, -1),
+            self._result,
+            self._layers,
+            traces=self._traces,
+            playhead=self._playhead,
         )
         painter.end()
 
@@ -300,6 +343,11 @@ class ScenarioPanel(QWidget):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
         self._workers: set[Worker[ScenarioResult]] = set()
+        self._section = BodySection.WHOLE
+        self._run_timer = QTimer(self)
+        self._run_timer.setInterval(RUN_FRAME_MS)
+        self._run_timer.timeout.connect(self._advance_run)
+        self._run_progress = 0.0
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(DEBOUNCE_MS)
@@ -504,6 +552,18 @@ class ScenarioPanel(QWidget):
         self._busy.hide()
         header.addWidget(self._busy)
         header.addStretch(1)
+        self._run_button = QToolButton()
+        self._run_button.setObjectName("scenarioSegment")
+        self._run_button.setText(RUN_CAPTION)
+        self._run_button.setToolTip("车体包络自起点沿路径跑到终点")
+        self._run_button.clicked.connect(self._toggle_run)
+        header.addWidget(self._run_button)
+        self._section_segment = _Segment(
+            tuple((section, SECTION_CAPTIONS[section]) for section in BodySection)
+        )
+        self._section_segment.changed.connect(self._section_changed)
+        self._section_segment.select(BodySection.WHOLE)
+        header.addWidget(self._section_segment)
         self._layer_buttons: dict[str, QToolButton] = {}
         for key, caption in (
             ("envelope", "扫掠包络"),
@@ -644,8 +704,48 @@ class ScenarioPanel(QWidget):
 
     def _layers_changed(self, _checked: bool) -> None:
         self.plan.set_layers(
-            PlanLayers(**{key: button.isChecked() for key, button in self._layer_buttons.items()})
+            PlanLayers(
+                **{key: button.isChecked() for key, button in self._layer_buttons.items()},
+                section=self._section,
+            )
         )
+
+    def _section_changed(self, section: BodySection) -> None:
+        self._section = section
+        self._layers_changed(True)
+
+    def _toggle_run(self) -> None:
+        if self._run_timer.isActive():
+            self._stop_run()
+            return
+        if self.plan.pose_count < 2:
+            return
+        self._run_progress = 0.0
+        self.plan.set_playhead(0.0)
+        self._run_button.setText(RUN_STOP_CAPTION)
+        self._run_timer.start()
+
+    def _stop_run(self, *, clear: bool = True) -> None:
+        """Stop the run. ``clear`` removes the body; a completed run leaves it at the end.
+
+        Reaching the terminus and vanishing reads as a glitch, and where the maneuver puts
+        the truck at the end is worth seeing. Interrupting one is different: the body would
+        be resting somewhere arbitrary, so that clears.
+        """
+
+        self._run_timer.stop()
+        self._run_button.setText(RUN_CAPTION)
+        if clear:
+            self.plan.set_playhead(None)
+
+    def _advance_run(self) -> None:
+        self._run_progress += RUN_FRAME_MS / (RUN_SECONDS * 1000.0)
+        if self._run_progress >= 1.0:
+            self._run_progress = 1.0
+            self.plan.set_playhead(1.0)
+            self._stop_run(clear=False)
+            return
+        self.plan.set_playhead(self._run_progress)
 
     def _sync_controls(self) -> None:
         inputs = self._inputs
@@ -706,6 +806,8 @@ class ScenarioPanel(QWidget):
         self._timer.start()
 
     def _start_solve(self) -> None:
+        # The path is about to be rebuilt, so a run-through part way along it is stale.
+        self._stop_run()
         self._pending = False
         self._generation += 1
         generation = self._generation
