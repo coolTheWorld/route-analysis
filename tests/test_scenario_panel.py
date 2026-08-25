@@ -1,6 +1,7 @@
 import pytest
 from pytestqt.qtbot import QtBot
 
+from route_analysis import theme
 from route_analysis.models import ClearanceStatus, VehicleDimensions
 from route_analysis.scenario_geometry import (
     SOLVED_KEYS,
@@ -8,7 +9,8 @@ from route_analysis.scenario_geometry import (
     Scenario,
     SolveMode,
 )
-from route_analysis.scenario_panel import ScenarioPanel
+from route_analysis.scenario_graphics import LEGEND_ITEMS, BodySection
+from route_analysis.scenario_panel import RUN_CAPTION, ScenarioPanel
 
 SOLVE_TIMEOUT_MS = 30_000
 """Forward solves in the heaviest variants run past a second on a busy machine."""
@@ -153,3 +155,63 @@ def test_a_uturn_that_cannot_hold_the_radius_says_so_on_the_card(qtbot: QtBot) -
     result = _settled(qtbot, panel)
     assert result.infeasible
     assert result.required_lane_width == pytest.approx(2.6)
+
+
+def test_the_envelope_can_show_one_end_of_the_body_at_a_time(qtbot: QtBot) -> None:
+    """Sectioning is a drawing choice, so it must not cost a solve."""
+
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    assert panel.plan._layers.section is BodySection.WHOLE
+    generation = panel._generation
+    for section in (BodySection.FRONT, BodySection.REAR, BodySection.WHOLE):
+        panel._section_segment._buttons[section].click()
+        assert panel.plan._layers.section is section
+    assert panel._generation == generation
+
+
+def test_the_two_body_sections_are_named_in_the_legend(qtbot: QtBot) -> None:
+    """Fixed colours are only readable if the legend says which half each one is."""
+
+    captions = [item[0] for item in LEGEND_ITEMS]
+    colours = {item[0]: item[1] for item in LEGEND_ITEMS}
+    front = next(name for name in captions if "前段" in name)
+    rear = next(name for name in captions if "后段" in name)
+    assert "中心前距" in front and "中心后距" in rear
+    assert colours[front] == theme.SECTION_FRONT
+    assert colours[rear] == theme.SECTION_REAR
+    assert colours[front] != colours[rear]
+
+
+def test_the_run_through_walks_the_playhead_and_stops_at_the_end(qtbot: QtBot) -> None:
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    assert panel.plan._playhead is None
+    panel._run_button.click()
+    assert panel._run_timer.isActive()
+    assert panel.plan._playhead == pytest.approx(0.0)
+    seen = []
+    for _ in range(400):
+        if not panel._run_timer.isActive():
+            break
+        panel._advance_run()
+        if panel.plan._playhead is not None:
+            seen.append(panel.plan._playhead)
+    assert not panel._run_timer.isActive(), "跑完必须自己停下"
+    assert panel.plan._playhead == pytest.approx(1.0)
+    assert seen == sorted(seen), "播放位置只能单向前进"
+    assert panel._run_button.text() == RUN_CAPTION
+
+
+def test_starting_a_new_solve_abandons_a_run_in_progress(qtbot: QtBot) -> None:
+    """The path is rebuilt underneath it, so a part-way run-through no longer means anything."""
+
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    panel._run_button.click()
+    assert panel._run_timer.isActive()
+    panel._scenario_changed(Scenario.UTURN)
+    _settled(qtbot, panel)
+    assert not panel._run_timer.isActive()
+    assert panel.plan._playhead is None
+    assert panel._run_button.text() == RUN_CAPTION
