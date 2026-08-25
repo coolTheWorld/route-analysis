@@ -19,8 +19,6 @@ from route_analysis import theme
 from route_analysis.clearance_graphics import _font, _pen, _text, _tinted, format_length
 from route_analysis.models import VehicleDimensions
 from route_analysis.scenario_geometry import (
-    Arc,
-    Line,
     Scenario,
     ScenarioLayout,
     dimension_label,
@@ -320,48 +318,6 @@ def _draw_playhead(
         centre = transform.point(float(trace.x[index]), float(trace.y[index]))
         painter.setPen(_pen(theme.ACCENT_DEEP, 1.4))
         painter.drawEllipse(centre, 2.6, 2.6)
-
-
-def _primitive_anchor(item: Line | Arc) -> tuple[float, float]:
-    if isinstance(item, Line):
-        middle_x = (item.start[0] + item.end[0]) / 2
-        middle_y = (item.start[1] + item.end[1]) / 2
-        vertical = abs(item.end[0] - item.start[0]) < 1e-6
-        return (
-            middle_x + (0.55 if vertical else 0.0),
-            middle_y + (0.0 if vertical else 0.5),
-        )
-    middle = (item.start_angle + item.end_angle) / 2
-    reach = item.radius + 0.95
-    return (
-        item.centre[0] + reach * math.cos(middle),
-        item.centre[1] + reach * math.sin(middle),
-    )
-
-
-def _gear_pills(layout: ScenarioLayout) -> list[tuple[float, float, str]]:
-    """One pill per run of primitives sharing a gear.
-
-    Labelling each primitive puts two pills on top of each other wherever adjacent arcs
-    change gear, which is exactly what the borrowed-stub U-turn does, so merge the
-    neighbours that share a gear and anchor the pill at the middle of the run.
-    """
-
-    if not layout.maneuvers:
-        return []
-    runs: list[list[Line | Arc]] = []
-    for item in layout.maneuvers[0].primitives:
-        if runs and runs[-1][-1].gear is item.gear:
-            runs[-1].append(item)
-        else:
-            runs.append([item])
-    pills = []
-    for run in runs:
-        anchors = [_primitive_anchor(item) for item in run]
-        x = sum(point[0] for point in anchors) / len(anchors)
-        y = sum(point[1] for point in anchors) / len(anchors)
-        pills.append((x, y, f"{run[0].gear.value}档"))
-    return pills
 
 
 def _label_rect(painter: QPainter, point: QPointF, message: str, size: float) -> QRectF:
@@ -665,18 +621,6 @@ def paint_scenario_plan(
     _draw_endpoints(painter, transform, traces)
     if layers.dimensions:
         _draw_annotations(painter, transform, result)
-        for x, y, message in _gear_pills(layout):
-            point = transform.point(x, y)
-            box = _label_rect(painter, point, message, 9.5)
-            painter.setPen(_pen(theme.INPUT_BORDER, 1.0))
-            painter.setBrush(QBrush(QColor(theme.CARD)))
-            painter.drawRoundedRect(box, 7.0, 7.0)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            _text(
-                painter, box, message,
-                size=9.5, color=theme.TEXT_SECONDARY,
-                align=Qt.AlignmentFlag.AlignCenter,
-            )
     _draw_bottleneck(painter, transform, result)
     if not layout.buildable:
         _haloed_text(
