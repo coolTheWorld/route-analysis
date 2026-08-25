@@ -360,3 +360,72 @@ def test_forward_solution_reports_the_ceiling_even_when_it_succeeds():
     )
     assert solution.dims is not None
     assert solution.ceiling_clearance > 0.05
+
+
+def _search_ceilings(inputs: ScenarioInputs, given: RoadDimensions) -> dict[str, float]:
+    """The upper end of each solved dimension's bracket, mirroring ``solve_forward``."""
+
+    vehicle = inputs.dimensions
+    width_high = (
+        vehicle.width
+        + 2 * inputs.threshold
+        + 2 * max(math.hypot(inputs.radius + vehicle.width / 2, vehicle.center_rear)
+                  - inputs.radius, inputs.radius)
+        + 2.4
+    )
+    lane_seed = max(vehicle.width + 2 * inputs.threshold, 2 * inputs.radius - given.b) + 1
+    return {
+        "wa": width_high, "wb": width_high, "wv": width_high, "wh": width_high,
+        "ls": inputs.radius + vehicle.center_rear + inputs.threshold + 1.8,
+        "w": width_high + 2 * inputs.radius,
+        "d": inputs.radius + lane_seed + vehicle.center_rear + inputs.threshold + 3,
+    }
+
+
+@pytest.mark.parametrize("bidirectional", [False, True])
+@pytest.mark.parametrize("extreme", [False, True])
+@pytest.mark.parametrize("scenario", list(Scenario))
+def test_no_solved_dimension_is_left_at_its_search_ceiling(
+    scenario, extreme, bidirectional
+):
+    """A dimension stuck at the top of its bracket means the search found nothing, not
+
+    that the road really has to be that wide. Two-way crossback used to report a 7.02 m
+    turn-out road -- past its own 6.93 m ceiling, rescued there by the guard bump -- and
+    the view presented it as solved.
+    """
+
+    inputs = _inputs(
+        scenario=scenario, bidirectional=bidirectional, extreme=extreme,
+        mode=SolveMode.FORWARD,
+    )
+    given = RoadDimensions()
+    result = solve_scenario(inputs, given)
+    assert not result.infeasible
+    ceilings = _search_ceilings(inputs, given)
+    for key in SOLVED_KEYS[scenario]:
+        assert getattr(result.dims, key) < ceilings[key] - 1e-6, (key, result.dims)
+
+
+def test_two_way_crossback_does_not_trade_the_whole_road_for_the_dip():
+    """Regression: compressing one dimension at a time let whichever went first take the
+
+    entire budget while the rest still sat at their ceilings, so the two-way turn-out road
+    solved to 7.02 m beside a 0.36 m dip when the one-way answer -- 2.31 m and 2.72 m --
+    fits the two-way layout too. Its region is the one-way one minus a wall and its second
+    maneuver is an exact mirror, so two-way can never need a wider road than one-way here.
+    """
+
+    one_way, two_way = (
+        solve_scenario(
+            _inputs(
+                scenario=Scenario.CROSSBACK, bidirectional=bidirectional,
+                mode=SolveMode.FORWARD,
+            ),
+            RoadDimensions(),
+        ).dims
+        for bidirectional in (False, True)
+    )
+    assert two_way.wh == pytest.approx(one_way.wh, abs=2e-3)
+    assert two_way.ls == pytest.approx(one_way.ls, abs=2e-3)
+    assert two_way.wv == pytest.approx(one_way.wv, abs=2e-3)

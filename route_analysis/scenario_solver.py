@@ -41,10 +41,16 @@ COARSE_LINE_STEP = 0.18
 """Search coarse, verify fine: bisection only needs feasibility, the reading needs precision."""
 
 FEASIBLE_SLACK = 4e-4
-SCAN_SAMPLES = 10
-BISECTION_STEPS = 10
+SHRINK_START_FRACTION = 0.25
+"""First shrink step, as a fraction of the widest solved dimension's search span.
+
+ARBITRARY, tuned across the eight scenarios: wide enough that the early cycles cost only
+a handful of evaluations, narrow enough that the first wall is met before any dimension
+has given up much ground.
+"""
+SHRINK_LEVELS = 7
+"""Halvings of the shrink step; the last resolves to about 20 mm, which ``_tighten`` refines."""
 TIGHTEN_STEPS = 12
-GAUSS_SEIDEL_ROUNDS = 3
 GUARD_ROUNDS = 3
 BAND_SAMPLES = 24
 MIN_PENETRATION = 1e-3
@@ -410,52 +416,56 @@ def optimise_offsets(
     return offsets, best
 
 
-def _feasible(
-    inputs: ScenarioInputs, dims: RoadDimensions, *, thorough: bool = False
-) -> bool:
+def _feasible(inputs: ScenarioInputs, dims: RoadDimensions) -> bool:
     target = inputs.threshold - FEASIBLE_SLACK
     if inputs.optimises_offsets:
-        return optimise_offsets(inputs, dims, COARSE, cheap=not thorough)[1] >= target
+        return optimise_offsets(inputs, dims, COARSE, cheap=True)[1] >= target
     return evaluate(inputs, dims, initial_offsets(inputs), COARSE).clearance >= target
 
 
-def _minimal_feasible(
+def _shrink_wrap(
     inputs: ScenarioInputs,
     dims: RoadDimensions,
-    key: str,
-    low: float,
-    high: float,
-    *,
-    thorough: bool = False,
-) -> float | None:
-    """Smallest feasible value this dimension can take within ``[low, high]``.
+    keys: tuple[str, ...],
+    brackets: dict[str, tuple[float, float]],
+) -> RoadDimensions:
+    """Draw every solved dimension in at the same rate until each one meets its own wall.
 
-    Feasibility is not a monotone half-line. Widening a U-turn aisle also widens the
-    turning circle, so the swept apex reaches further into the end head and "wider" can
-    stop fitting. Plain bisection lands on the infeasible side and pins the answer to the
-    search ceiling, so scan for the lowest feasible sample first and bisect only to its
-    left. The current value joins the scan so the solve never steps off a feasible point.
+    Compressing them one at a time lands on an extreme vertex of the frontier instead of
+    a road anyone would build. Whichever dimension goes first is minimised while the rest
+    still sit at their search ceilings, where they constrain nothing, so it takes the whole
+    budget and the others can no longer move: two-way crossback solved the turn-out road to
+    7.02 m beside a 0.36 m dip -- past its own 6.93 m search ceiling -- when 2.31 m and
+    2.72 m both fit. Reordering does not help, it just hands the blow-up to whichever
+    dimension now goes first (turn-out first gives a 6.12 m reverse lane instead).
+
+    Stepping them down together keeps the coupling in view the whole way, so each one stops
+    where its own wall is rather than where another one's slack let it run. A step is taken
+    only when the result is feasible, which is what keeps this honest on the non-monotone
+    dimensions: widening a U-turn aisle also widens the turning circle, so the swept apex
+    reaches further into the end head and "wider" can stop fitting. Feasibility is therefore
+    not a half-line, and a step refused at one size may still be taken at half of it.
     """
 
-    current = getattr(dims, key)
-    grid = {low + (high - low) * step / SCAN_SAMPLES for step in range(SCAN_SAMPLES + 1)}
-    if low <= current <= high:
-        grid.add(current)
-    previous: float | None = None
-    for value in sorted(grid):
-        if _feasible(inputs, dims.with_value(key, value), thorough=thorough):
-            if previous is None:
-                return value
-            lower, upper = previous, value
-            for _ in range(BISECTION_STEPS):
-                middle = (lower + upper) / 2
-                if _feasible(inputs, dims.with_value(key, middle), thorough=thorough):
-                    upper = middle
-                else:
-                    lower = middle
-            return upper
-        previous = value
-    return None
+    step = SHRINK_START_FRACTION * max(
+        getattr(dims, key) - brackets[key][0] for key in keys
+    )
+    for _ in range(SHRINK_LEVELS):
+        if step <= 0.0:
+            break
+        moved = True
+        while moved:
+            moved = False
+            for key in keys:
+                current = getattr(dims, key)
+                candidate = max(brackets[key][0], current - step)
+                if candidate >= current - 1e-9:
+                    continue
+                if _feasible(inputs, dims.with_value(key, candidate)):
+                    dims = dims.with_value(key, candidate)
+                    moved = True
+        step /= 2.0
+    return dims
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,14 +512,7 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
     ceiling = _report_clearance(inputs, dims)[1]
     if not _feasible(inputs, dims):
         return ForwardSolution(None, ceiling)
-    for _ in range(GAUSS_SEIDEL_ROUNDS):
-        for key in keys:
-            low, high = brackets[key]
-            solved = _minimal_feasible(
-                inputs, dims, key, low, max(high, getattr(dims, key))
-            )
-            if solved is not None:
-                dims = dims.with_value(key, solved)
+    dims = _shrink_wrap(inputs, dims, keys, brackets)
     for _ in range(GUARD_ROUNDS):
         check = _report_clearance(inputs, dims)[1]
         if check >= inputs.threshold:
