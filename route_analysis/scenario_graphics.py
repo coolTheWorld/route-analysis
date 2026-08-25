@@ -48,9 +48,14 @@ class BodySection(StrEnum):
 
 SECTION_CAPTIONS: dict[BodySection, str] = {
     BodySection.WHOLE: "整车",
-    BodySection.FRONT: "仅前段",
-    BodySection.REAR: "仅后段",
+    BodySection.FRONT: "中心前距",
+    BodySection.REAR: "中心后距",
 }
+"""Named after the dimensions themselves, because the picker sits right under their inputs.
+
+The map page keeps 仅前段 / 仅后段 for the same split: there is no 中心前距 field beside it
+there, so the section has to be described rather than pointed at.
+"""
 
 
 @dataclass(frozen=True, slots=True)
