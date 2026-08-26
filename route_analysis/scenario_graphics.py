@@ -437,15 +437,15 @@ def _dimension_marks(result: ScenarioResult) -> list[tuple[tuple, tuple, str, st
             f"{label('wh')} {dims.wh:.2f}", "wh",
         ))
         marks.append((
-            (-dims.wv / 2, -dims.wh / 2 - dims.ls + 0.4),
-            (dims.wv / 2, -dims.wh / 2 - dims.ls + 0.4),
+            (-dims.wv / 2, -dims.wh / 2 - 0.5), (dims.wv / 2, -dims.wh / 2 - 0.5),
             f"{label('wv')} {dims.wv:.2f}", "wv",
         ))
-        marks.append((
-            (dims.wv / 2 + 0.45, -dims.wh / 2),
-            (dims.wv / 2 + 0.45, -dims.wh / 2 - dims.ls),
-            f"{label('ls')} {dims.ls:.2f}", "ls",
-        ))
+        if result.trunk_reach is not None:
+            marks.append((
+                (dims.wv / 2, -dims.wh / 2 + 0.45),
+                (dims.wv / 2 + result.trunk_reach, -dims.wh / 2 + 0.45),
+                f"出弯主路深度 {result.trunk_reach:.2f}", "le",
+            ))
     else:
         outer = layout.extents["outer"]
         ld = layout.extents["ld"]
