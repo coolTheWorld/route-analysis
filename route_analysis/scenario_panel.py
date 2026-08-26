@@ -84,7 +84,7 @@ the same seconds as a long one makes that easier to follow, not harder.
 ROAD_KEYS: dict[Scenario, tuple[str, ...]] = {
     Scenario.CORNER: ("wa", "wb"),
     Scenario.CROSSBACK: ("wv", "wh", "ls"),
-    Scenario.STUBBACK: ("wh", "wv", "ls"),
+    Scenario.STUBBACK: ("wh", "wv"),
     Scenario.UTURN: ("w", "b", "d"),
 }
 CARD_NAMES: dict[Scenario, str] = {
@@ -923,6 +923,13 @@ class ScenarioPanel(QWidget):
             )
         if result.turn_radius is not None:
             card.add_row("实际掉头半径 rs", f"{format_length(result.turn_radius)} m")
+        if result.trunk_reach is not None:
+            card.add_row("出弯主路深度", f"{format_length(result.trunk_reach)} m")
+            card.set_note(
+                "出弯主路深度自支路开口的外侧壁量起，是倒车摆出占用的那一段主路，"
+                "由扫掠结果量得而非求解得出 —— 主路本身继续延伸，两端都不是墙。"
+            )
+            return
         card.set_note("")
 
     def _fill_detail(self, result: ScenarioResult) -> None:
