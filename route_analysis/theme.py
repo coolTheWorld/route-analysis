@@ -106,6 +106,13 @@ ACCENT_BORDER = "#4784d5"
 AREA_FILL = "#4f8dd8"
 AREA_STROKE = "#3972b6"
 SWEEP_FILL = "#14395f"
+ENDPOINT_END = "#7b4bc9"
+"""Where a maneuver finishes. Its own colour because the marker carries no caption.
+
+It shared the danger point's red until the captions came off the plan, which left the end
+of the path and the tightest clearance as two identical red dots with only the clearance
+one carrying a number to tell them apart.
+"""
 SECTION_FRONT = "#1f7a8c"
 """The centre-to-nose half of the body, measured by 中心前距."""
 SECTION_REAR = "#c2683a"
