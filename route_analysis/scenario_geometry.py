@@ -54,7 +54,7 @@ FIXED_GEAR_SCENARIOS = (Scenario.CROSSBACK, Scenario.STUBBACK)
 SOLVED_KEYS: dict[Scenario, tuple[str, ...]] = {
     Scenario.CORNER: ("wa", "wb"),
     Scenario.CROSSBACK: ("wv", "wh", "ls"),
-    Scenario.STUBBACK: ("wh", "wv", "ls"),
+    Scenario.STUBBACK: ("wh", "wv"),
     Scenario.UTURN: ("w", "d"),
 }
 
@@ -71,7 +71,6 @@ DIMENSION_LABELS: dict[Scenario, dict[str, tuple[str, str]]] = {
     Scenario.STUBBACK: {
         "wh": ("主路宽", "主路宽"),
         "wv": ("支路宽", "支路宽"),
-        "ls": ("支路深度", "支路深度"),
     },
     Scenario.UTURN: {
         "w": ("巷道宽", "巷道宽"),
@@ -379,18 +378,22 @@ def _stubback(
 ) -> ScenarioLayout:
     vehicle = inputs.dimensions
     radius = inputs.radius
-    wh, wv, ls = dims.wh, dims.wv, dims.ls
+    wh, wv = dims.wh, dims.wv
     ry = -offsets.a
     sx = -(0.0 if inputs.bidirectional else offsets.so)
     length = vehicle.center_front + vehicle.center_rear
     lx = abs(sx) + radius + length + 1.2
     lxx = lx + CAP_PAD
+    # The branch carries on past the parked truck, so its far end is pushed out of reach
+    # like the open ends of the trunk. How much deeper it runs constrains nothing.
+    floor = -wh / 2 - CAP_PAD
     region = (
-        (-lxx, -wh / 2), (-wv / 2, -wh / 2), (-wv / 2, -wh / 2 - ls),
-        (wv / 2, -wh / 2 - ls), (wv / 2, -wh / 2), (lxx, -wh / 2),
+        (-lxx, -wh / 2), (-wv / 2, -wh / 2), (-wv / 2, floor),
+        (wv / 2, floor), (wv / 2, -wh / 2), (lxx, -wh / 2),
         (lxx, wh / 2), (-lxx, wh / 2),
     )
     reach = length + 0.8
+    view_floor = min(-wh / 2, ry - radius - vehicle.center_front) - 0.8
     primitives = (
         Arc((sx + radius, ry - radius), radius, math.pi, math.pi / 2, Gear.REVERSE),
         Line((sx + radius, ry), (sx - radius - reach, ry), Gear.DRIVE),
@@ -401,8 +404,8 @@ def _stubback(
     return ScenarioLayout(
         region=region,
         maneuvers=tuple(maneuvers),
-        centrelines=(((-lx, 0.0), (lx, 0.0)), ((0.0, -wh / 2 - ls), (0.0, wh / 2))),
-        view_bounds=(-lx, -wh / 2 - ls, lx, wh / 2),
+        centrelines=(((-lx, 0.0), (lx, 0.0)), ((0.0, view_floor), (0.0, wh / 2))),
+        view_bounds=(-lx, view_floor, lx, wh / 2),
         extents={"lx": lx},
     )
 
