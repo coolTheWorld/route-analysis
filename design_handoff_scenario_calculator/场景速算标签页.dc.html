@@ -596,6 +596,9 @@ class Component extends DCLogic {
 
     // ---------- scenario builders ----------
     const PI = Math.PI;
+    // 端墙外推量。产品侧为 6.0；夹具逐位对拍时 Python 把 CAP_PAD 置零，此处同取 0，
+    // 两边的区域多边形才是同一个。改这个值必须两边一起改。
+    const CAP = 0;
     const mk = (dims, off) => {
       if (type === 'corner') {
         const wA = dims.wA, wB = dims.wB, eA = off.eA || 0, eB = bidir ? 0 : (off.eB || 0);
@@ -635,20 +638,22 @@ class Component extends DCLogic {
         return { poly, mans, centers, LW, LN };
       }
       if (type === 'stubback') {
-        const wH = dims.wH, wV = dims.wV, LS = dims.LS, a = off.a || 0, so = bidir ? 0 : (off.so || 0);
+        // 起点整车停在支路内、车头朝支路深处，R 档一段四分之一弧倒转至主路一侧，
+        // 车头与主路摆正后换 D 档沿主路驶离。支路不设尽头（CAP 与主路两端同处理），
+        // 因此不再有支路深度这一项。
+        const wH = dims.wH, wV = dims.wV, a = off.a || 0, so = bidir ? 0 : (off.so || 0);
         const ry = -a, sxx = -so;
         const LX = Math.abs(sxx) + R + Lf + Lr + 1.2;
-        const poly = [[-LX, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2 - LS], [wV / 2, -wH / 2], [LX, -wH / 2], [LX, wH / 2], [-LX, wH / 2]];
+        const floor = -wH / 2 - CAP;
+        const poly = [[-LX, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, floor], [wV / 2, floor], [wV / 2, -wH / 2], [LX, -wH / 2], [LX, wH / 2], [-LX, wH / 2]];
         const reach = Lf + Lr + 0.8;
         const prims = [
-          { t: 'L', a: [sxx - R - reach, ry], b: [sxx + R, ry], g: 'D' },
-          { t: 'A', c: [sxx + R, ry - R], r: R, a0: PI / 2, a1: PI, g: 'R' },
-          { t: 'A', c: [sxx - R, ry - R], r: R, a0: 0, a1: PI / 2, g: 'D' },
-          { t: 'L', a: [sxx - R, ry], b: [sxx - R - reach, ry], g: 'D' },
+          { t: 'A', c: [sxx + R, ry - R], r: R, a0: PI, a1: PI / 2, g: 'R' },
+          { t: 'L', a: [sxx + R, ry], b: [sxx - R - reach, ry], g: 'D' },
         ];
-        const mans = [{ prims, label: '自西进入' }];
-        if (bidir) mans.push({ prims: mirror(prims), label: '自东进入' });
-        const centers = [[[-LX, 0], [LX, 0]], [[0, -wH / 2 - LS], [0, wH / 2]]];
+        const mans = [{ prims, label: '向西驶出' }];
+        if (bidir) mans.push({ prims: mirror(prims), label: '向东驶出' });
+        const centers = [[[-LX, 0], [LX, 0]], [[0, floor], [0, wH / 2]]];
         return { poly, mans, centers, LX };
       }
       // uturn
@@ -670,15 +675,16 @@ class Component extends DCLogic {
         const centers = [[[-s / 2, -LD], [-s / 2, 0.4]], [[s / 2, -LD], [s / 2, 0.4]]];
         return { poly, mans: [{ prims, label: '掉头' }], centers, rs, LD, OW };
       }
+      // 两条机动都自中巷起步、各自驶入一条外巷；反过来会让它们在共用的中巷里迎头相对。
       const eo = off.eo || 0, s = w + b;
-      const xL = -s + eo, xR = 0, sep = xR - xL, rs = sep / 2;
+      const xUp = 0, xDn = -s + eo, rs = Math.abs(xDn - xUp) / 2;
       const OW = 1.5 * w + b;
       const poly = [[-OW, -LD], [-w / 2 - b, -LD], [-w / 2 - b, 0], [-w / 2, 0], [-w / 2, -LD], [w / 2, -LD], [w / 2, 0], [w / 2 + b, 0], [w / 2 + b, -LD], [OW, -LD], [OW, D], [-OW, D]];
       if (rs < R - 1e-9) return { poly, bad: R - rs, rs, centers: [] };
       const prims = [
-        { t: 'L', a: [xL, -LD + tr0 + 0.15], b: [xL, yc], g },
-        { t: 'A', c: [(xL + xR) / 2, yc], r: rs, a0: PI, a1: 0, g },
-        { t: 'L', a: [xR, yc], b: [xR, -LD + ld0 + 0.15], g },
+        { t: 'L', a: [xUp, -LD + tr0 + 0.15], b: [xUp, yc], g },
+        { t: 'A', c: [(xUp + xDn) / 2, yc], r: rs, a0: 0, a1: PI, g },
+        { t: 'L', a: [xDn, yc], b: [xDn, -LD + ld0 + 0.15], g },
       ];
       const centers = [[[-s, -LD], [-s, 0.4]], [[0, -LD], [0, 0.4]], [[s, -LD], [s, 0.4]]];
       return { poly, mans: [{ prims, label: '左侧掉头' }, { prims: mirror(prims), label: '右侧掉头' }], centers, rs, LD, OW };
@@ -746,7 +752,7 @@ class Component extends DCLogic {
     // ---------- forward solve ----------
     const bGiven = Math.max(0.05, num(st.rB, 1.0));
     let dims, infeasible = false;
-    const solvedKeys = { corner: ['wA', 'wB'], crossback: ['wV', 'wH', 'LS'], stubback: ['wH', 'wV', 'LS'], uturn: ['w', 'D'] }[type];
+    const solvedKeys = { corner: ['wA', 'wB'], crossback: ['wV', 'wH', 'LS'], stubback: ['wH', 'wV'], uturn: ['w', 'D'] }[type];
     if (mode === 'fwd') {
       const hiW = W + 2 * c + 2 * Math.max(Rbo - R, R) + 2.4;
       const brks = {
@@ -1005,7 +1011,7 @@ class Component extends DCLogic {
     const roadDefs = {
       corner: [{ key: 'rWA', label: st.bidir ? '横向主路宽' : '进入道宽' }, { key: 'rWB', label: st.bidir ? '竖向支路宽' : '驶出道宽' }],
       crossback: [{ key: 'rWV', label: '倒车道宽' }, { key: 'rWH', label: '转出道宽' }, { key: 'rLS', label: '下探长度（长）' }],
-      stubback: [{ key: 'rWH', label: '主路宽' }, { key: 'rWV', label: '支路宽' }, { key: 'rLS', label: '支路深度（长）' }],
+      stubback: [{ key: 'rWH', label: '主路宽' }, { key: 'rWV', label: '支路宽' }],
       uturn: [{ key: 'rW', label: '巷道宽' }, { key: 'rB', label: '隔墙宽' }, { key: 'rD', label: '端头深度（长）' }],
     };
     let roadRows = fwd
@@ -1037,7 +1043,7 @@ class Component extends DCLogic {
       const labels = {
         corner: [['wA', st.bidir ? '横向主路最小宽' : '进入道最小宽'], ['wB', st.bidir ? '竖向支路最小宽' : '驶出道最小宽']],
         crossback: [['wV', '倒车道最小宽'], ['wH', '转出道最小宽'], ['LS', '倒车下探长度（长）']],
-        stubback: [['wH', '主路最小宽'], ['wV', '支路最小宽'], ['LS', '支路最短深度（长）']],
+        stubback: [['wH', '主路最小宽'], ['wV', '支路最小宽']],
         uturn: [['w', '巷道最小宽'], ['D', '端头最小深度（长）']],
       }[st.type];
       if (fwd) {

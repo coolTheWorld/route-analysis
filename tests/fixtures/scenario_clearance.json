@@ -3382,7 +3382,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.6449999999999996,
    "buildable": true
   },
   {
@@ -3413,7 +3413,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -1.8949999999999996,
    "buildable": true
   },
   {
@@ -3444,7 +3444,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.4449999999999998,
    "buildable": true
   },
   {
@@ -3475,7 +3475,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.3949999999999996,
    "buildable": true
   },
   {
@@ -3506,7 +3506,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -1.6449999999999996,
    "buildable": true
   },
   {
@@ -3537,7 +3537,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.1949999999999998,
    "buildable": true
   },
   {
@@ -3568,7 +3568,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.2449999999999997,
    "buildable": true
   },
   {
@@ -3599,7 +3599,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -1.4949999999999997,
    "buildable": true
   },
   {
@@ -3630,7 +3630,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.1449999999999996,
    "buildable": true
   },
   {
@@ -3661,7 +3661,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -3692,7 +3692,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -1.1949999999999994,
    "buildable": true
   },
   {
@@ -3723,7 +3723,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.1449999999999996,
    "buildable": true
   },
   {
@@ -3754,7 +3754,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -3785,7 +3785,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -0.9449999999999994,
    "buildable": true
   },
   {
@@ -3816,7 +3816,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.1449999999999996,
    "buildable": true
   },
   {
@@ -3847,7 +3847,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.3949999999999996,
    "buildable": true
   },
   {
@@ -3878,7 +3878,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.6230000000000002,
+   "clearance": -1.6449999999999996,
    "buildable": true
   },
   {
@@ -3909,7 +3909,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999986,
+   "clearance": -1.1949999999999998,
    "buildable": true
   },
   {
@@ -3940,7 +3940,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.645,
    "buildable": true
   },
   {
@@ -3971,7 +3971,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.895,
    "buildable": true
   },
   {
@@ -4002,7 +4002,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.4450000000000003,
    "buildable": true
   },
   {
@@ -4033,7 +4033,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.395,
    "buildable": true
   },
   {
@@ -4064,7 +4064,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.645,
    "buildable": true
   },
   {
@@ -4095,7 +4095,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1950000000000003,
    "buildable": true
   },
   {
@@ -4126,7 +4126,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.245,
    "buildable": true
   },
   {
@@ -4157,7 +4157,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.495,
    "buildable": true
   },
   {
@@ -4188,7 +4188,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4219,7 +4219,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4250,7 +4250,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1949999999999998,
    "buildable": true
   },
   {
@@ -4281,7 +4281,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4312,7 +4312,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4343,7 +4343,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4374,7 +4374,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1449999999999987,
    "buildable": true
   },
   {
@@ -4405,7 +4405,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.395,
    "buildable": true
   },
   {
@@ -4436,7 +4436,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.645,
    "buildable": true
   },
   {
@@ -4467,7 +4467,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -1.8229999999999977,
+   "clearance": -1.1950000000000003,
    "buildable": true
   },
   {
@@ -5614,7 +5614,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.2823442665337845,
+   "clearance": -0.270299665627723,
    "buildable": true
   },
   {
@@ -5645,7 +5645,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.45657252476306276,
+   "clearance": -0.1991738095820228,
    "buildable": true
   },
   {
@@ -5707,7 +5707,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.06780975607744999,
+   "clearance": 0.06780975607745043,
    "buildable": true
   },
   {
@@ -5738,7 +5738,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.10897440065395081,
+   "clearance": 0.11525917768469673,
    "buildable": true
   },
   {
@@ -5769,7 +5769,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.15000000000000036,
+   "clearance": 0.0043083270577071175,
    "buildable": true
   },
   {
@@ -5831,7 +5831,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.0022181214439331853,
+   "clearance": 0.15000000000000036,
    "buildable": true
   },
   {
@@ -5862,7 +5862,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.15000000000000036,
+   "clearance": 0.11765573346621583,
    "buildable": true
   },
   {
@@ -6172,7 +6172,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.27029966562772345,
+   "clearance": -0.2823442665337845,
    "buildable": true
   },
   {
@@ -6203,7 +6203,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.1991738095820228,
+   "clearance": -0.45657252476306276,
    "buildable": true
   },
   {
@@ -6265,7 +6265,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.06780975607745043,
+   "clearance": 0.06780975607744999,
    "buildable": true
   },
   {
@@ -6296,7 +6296,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.11525917768469673,
+   "clearance": -0.10897440065395081,
    "buildable": true
   },
   {
@@ -6327,7 +6327,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.0043083270577071175,
+   "clearance": 0.15000000000000036,
    "buildable": true
   },
   {
@@ -6389,7 +6389,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.15000000000000036,
+   "clearance": 0.0022181214439331853,
    "buildable": true
   },
   {
@@ -6420,7 +6420,7 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": 0.11765573346621583,
+   "clearance": 0.15000000000000036,
    "buildable": true
   },
   {
