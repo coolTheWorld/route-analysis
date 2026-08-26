@@ -249,28 +249,26 @@ def _draw_direction(
 def _draw_endpoints(
     painter: QPainter, transform: _Transform, traces: tuple[ManeuverTrace, ...]
 ) -> None:
-    """Mark where each maneuver begins and ends, so the path reads in the right order."""
+    """Mark where each maneuver begins and ends, so the path reads in the right order.
+
+    Dots only. The captions sat 13 px above them and, at the scale these plans draw at,
+    covered the very dots they named -- the start dot sits in the branch mouth, right where
+    the dimension marks and the sweep already crowd. Which dot is which lives in the legend
+    instead, where nothing has to overlap.
+    """
 
     for trace in traces:
         if not len(trace.x):
             continue
-        for index, caption, colour in (
-            (0, "起点", theme.SUCCESS_BAR),
-            (len(trace.x) - 1, "终点", theme.DANGER_POINT),
+        for index, colour in (
+            (0, theme.SUCCESS_BAR),
+            (len(trace.x) - 1, theme.ENDPOINT_END),
         ):
             point = transform.point(float(trace.x[index]), float(trace.y[index]))
             painter.setPen(_pen(theme.CANVAS_BASE, 2.0))
             painter.setBrush(QBrush(QColor(colour)))
             painter.drawEllipse(point, 4.6, 4.6)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            _haloed_text(
-                painter,
-                QPointF(point.x(), point.y() - 13.0),
-                caption,
-                size=9.5,
-                color=colour,
-                bold=True,
-            )
 
 
 def _draw_violations(
@@ -514,7 +512,7 @@ LEGEND_ITEMS = (
     ("路径 R档", theme.ACCENT, "dashed"),
     ("行进方向", theme.ACCENT_DEEP, "solid"),
     ("起点", theme.SUCCESS_BAR, "dot"),
-    ("终点", theme.DANGER_POINT, "dot"),
+    ("终点", theme.ENDPOINT_END, "dot"),
     ("道路中心线", theme.TEXT_FAINT, "dashed"),
     ("越界位姿", theme.DANGER, "block"),
     ("最小净距点", theme.DANGER_POINT, "dot"),
@@ -618,10 +616,13 @@ def paint_scenario_plan(
     _draw_violations(painter, transform, traces)
     if playhead is not None:
         _draw_playhead(painter, transform, traces, vehicle, playhead)
-    _draw_endpoints(painter, transform, traces)
     if layers.dimensions:
         _draw_annotations(painter, transform, result)
     _draw_bottleneck(painter, transform, result)
+    # Last, so nothing can cover them. They are four pixels across and carry no caption of
+    # their own, so a dimension label landing on one erases it outright -- which is what the
+    # 出弯主路深度 mark did to the start dot whenever an offset moved it under the label.
+    _draw_endpoints(painter, transform, traces)
     if not layout.buildable:
         _haloed_text(
             painter,
