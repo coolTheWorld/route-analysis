@@ -14,16 +14,30 @@ app / main_window
 ├── path_details_panel           │
 │   ├── geometry                 │
 │   ├── lane_generation          │
+│   ├── auto_lane_dialog         │
 │   ├── turn_radius              │
 │   ├── turn_measurements        │
 │   └── radius_graphics          │
 ├── analysis ─── geometry        │
+├── clearance_panel              │
+│   ├── clearance_solver         │
+│   ├── clearance_geometry       │
+│   ├── clearance_graphics       │
+│   ├── corner_solver_view       │
+│   └── clearance_report         │
+├── scenario_panel               │
+│   ├── scenario_solver          │
+│   ├── scenario_geometry        │
+│   └── scenario_graphics        │
 ├── storage ──── models          │
-├── logging_setup                │
+├── logging_setup ── logging_ui  │
+├── runtime_paths / errors / theme
 └── workers                      │
                                 ▼
                          runtime data/ + log/
 ```
+
+画布区共三个标签页：`canvas` 的地图页、`clearance_panel` 的通行余量页、`scenario_panel` 的场景速算页。前两者依赖当前命令的路径，第三者完全不依赖，主窗口没有选中命令时也可用。
 
 - `models.py`：不可变路径姿态、保留原始 JSON 的命令/点位数据、车辆参数、分析结果，以及可编辑车道对象。
 - `geometry.py`：车辆矩形、yaw 最短角插值、圆弧/贝塞尔离散与真实长度、车道变换、缓冲与多车道并集。
@@ -39,6 +53,20 @@ app / main_window
 - `path_details_panel.py`：按需渲染的下发/实际点位表格、序号跳转、完整命令/点位 JSON、标签选择记忆及单来源错误/重试状态。
 - `control_panel.py`：图层开关、车道属性、锚点/圆弧/贝塞尔数值编辑、通行结果和四角半径明细。
 - `main_window.py`：层级导航、串行且独立的双来源路径查询、点位与画布双向选择、车道上下文切换、脏状态协议和后台分析。
+- `clearance_geometry.py`：四角半径闭式、扫掠带宽、切线长与顶点偏移、转角拟合与车道走向线重建。
+- `clearance_solver.py`：下发路径切分直行段与转弯段、逐段可行偏置带、耦合冲突、瓶颈排行、需求道宽三区与转角三自由度求解。
+- `clearance_graphics.py`：净距剖面、偏置带、三区标尺与转角俯视图的 QPainter 绘制；文字度量与配色工具也由此供给场景速算。
+- `clearance_panel.py`：通行余量页的编排 —— 只在可见时求解、选中行只定位不切页、导出 CSV 与 PDF。
+- `corner_solver_view.py`：转角求解二级视图的三个自由度滑杆、增益对比与未覆盖项清单。
+- `clearance_report.py`：A4 横向 PDF 报告，复用界面同一套控件与绘制代码，页眉带齐前提、页脚为免责声明。
+- `scenario_geometry.py`：四个场景的可通行区域多边形、机动原语与镜像；场景、档位、工况等枚举与各尺寸的名称都在此定义。端墙外推亦在此。
+- `scenario_solver.py`：位姿批量展开、净距求值、偏移坐标下降、同步收缩正向求解与反向校核；借支路场景的出弯主路深度在此量得。
+- `scenario_graphics.py`：场景速算俯视图的 QPainter 绘制 —— 区域、分段扫掠包络、路径与行进方向、起终点、尺寸标注、图例与模拟运行的车体。
+- `scenario_panel.py`：场景速算页的三栏编排、防抖重算与代次丢弃、图层与分段开关、模拟运行回放。
+- `auto_lane_dialog.py`：两点生成车道的预览对话框，展示两端延伸量、拟合偏差与圆弧失败计数。
+- `runtime_paths.py`：源码与冻结构建统一的 `data/` 与 `log/` 目录解析。
+- `theme.py`：全局配色与样式表，界面与导出报告共用同一套取值。
+- `errors.py` / `logging_ui.py`：可恢复错误类型，以及日志状态到状态栏的 Qt 信号桥。
 - `logging_setup.py`：UTF-8 JSON 事件、关联 ID、每日/容量混合轮转、保留策略和非阻断故障恢复。
 - `workers.py`：线程池适配器，只向 UI 传递简短可恢复错误；完整异常堆栈写入本地日志。
 
