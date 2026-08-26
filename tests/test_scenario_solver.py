@@ -46,31 +46,16 @@ OFFSET_KEYS = {
 PROTOTYPE_END_WALL = 0.15
 """What the prototype reports when its artificial end wall binds: a fixed 0.15 m trim."""
 
-SUPERSEDED_BY_REQUIREMENT = {Scenario.STUBBACK, Scenario.UTURN}
-"""Scenarios whose maneuver no longer matches the prototype the fixture was taken from.
+PROTOTYPE_INDEPENDENCE = """夹具的独立性对场景而言并不一致，这一点值得写明。
 
-The prototype drove stubback as a U-turn borrowed through the branch -- approach, reverse
-in, pull out the far side -- which the design handoff itself flagged as unconfirmed. The
-requirement owner has since settled it: the truck starts inside the branch nose-south,
-reverses through one quarter turn onto the east side of the trunk, and drives away west.
-Different path, so the prototype's readings are no longer the same question and comparing
-against them would only pin the old shape back in place.
+原型是设计交付稿先写的，Python 由它移植而来，所以两边一致证明的是移植忠实。借支路
+与双向 U 型两个场景后来按需求方的确认改了机动，原型随之同步 —— 那两处的机动形状因此
+不再是独立佐证，等于同一份理解写了两遍。
 
-The two-way U-turn went the same way: the prototype drove both maneuvers up an outer aisle
-and back down the shared middle one, and the requirement owner has since put it the other
-way round -- out of the middle, back into an outer. Same circle, opposite way round, and in
-D gear that swings the rear outer corner into the open turning head instead of at the outer
-wall, so the readings move.
-
-That leaves the right-angle and crossback cases carrying the cross-check on their own. It is
-worth saying plainly that half the fixture no longer applies: what it still proves is that
-the region builder, the sampling and the mirror agree with an independent implementation, and
-it proves that over fewer shapes than it used to.
+仍然独立的部分是求值链路本身：原型自己算线段间距与点在多边形内，Python 走 shapely 的
+向量化接口，两条完全不同的路。区域构造、位姿采样、镜像与净距计算对全部四个场景依旧
+是真正的交叉验证。
 """
-
-
-def _comparable(cases):
-    return [case for case in cases if Scenario(case["type"]) not in SUPERSEDED_BY_REQUIREMENT]
 
 
 def _inputs(**overrides) -> ScenarioInputs:
@@ -93,7 +78,6 @@ def test_geometry_layer_matches_the_prototype_case_for_case(monkeypatch):
 
     monkeypatch.setattr(scenario_geometry, "CAP_PAD", 0.0)
     vehicle, cases = _fixture_cases()
-    cases = _comparable(cases)
     dimensions = VehicleDimensions(
         width=vehicle["W"], center_front=vehicle["Lf"], center_rear=vehicle["Lr"]
     )
@@ -117,7 +101,7 @@ def test_geometry_layer_matches_the_prototype_case_for_case(monkeypatch):
         actual = evaluate(inputs, dims, offsets, steps, detail=True).clearance
         assert actual == pytest.approx(case["clearance"], abs=1e-6), case
         compared += 1
-    assert compared > 100, "对拍用例太少，夹具可能没重新生成"
+    assert compared > 200, "对拍用例太少，夹具可能没重新生成"
 
 
 def test_padded_end_walls_only_ever_loosen_the_result():
@@ -127,7 +111,6 @@ def test_padded_end_walls_only_ever_loosen_the_result():
     dimensions = VehicleDimensions(
         width=vehicle["W"], center_front=vehicle["Lf"], center_rear=vehicle["Lr"]
     )
-    cases = _comparable(cases)
     loosened = 0
     for case in cases:
         inputs = _inputs(
