@@ -427,8 +427,11 @@ def _uturn(
     mirrored: str
     if inputs.bidirectional:
         eo = offsets.eo
-        left = -pitch + eo
-        right = 0.0
+        # Both maneuvers set off up the shared middle aisle and come back down an outer
+        # one. Running it the other way round would have the two of them finishing nose to
+        # nose in the aisle they share.
+        ascend = 0.0
+        descend = -pitch + eo
         outer = 1.5 * w + b
         region = (
             (-outer, -ldx), (-w / 2 - b, -ldx), (-w / 2 - b, 0.0), (-w / 2, 0.0),
@@ -442,8 +445,8 @@ def _uturn(
         )
         primary, mirrored = "左侧掉头", "右侧掉头"
     else:
-        left = -pitch / 2 + offsets.e1
-        right = pitch / 2 - offsets.e2
+        ascend = -pitch / 2 + offsets.e1
+        descend = pitch / 2 - offsets.e2
         outer = pitch / 2 + w / 2
         region = (
             (-outer, -ldx), (-b / 2, -ldx), (-b / 2, 0.0), (b / 2, 0.0),
@@ -455,7 +458,7 @@ def _uturn(
         )
         primary, mirrored = "掉头", "掉头"
     view = (-outer, -ld, outer, depth)
-    turn_radius = (right - left) / 2
+    turn_radius = abs(descend - ascend) / 2
     extents = {"ld": ld, "outer": outer}
     if turn_radius < radius - 1e-9:
         return ScenarioLayout(
@@ -468,10 +471,19 @@ def _uturn(
             radius_shortfall=radius - turn_radius,
         )
     yc = offsets.yc
+    # The half circle always goes over the top; which end it starts from is whichever side
+    # the climbing aisle sits on.
+    climbing_left = ascend < descend
     primitives = (
-        Line((left, -ld + trail + 0.15), (left, yc), gear),
-        Arc(((left + right) / 2, yc), turn_radius, math.pi, 0.0, gear),
-        Line((right, yc), (right, -ld + lead + 0.15), gear),
+        Line((ascend, -ld + trail + 0.15), (ascend, yc), gear),
+        Arc(
+            ((ascend + descend) / 2, yc),
+            turn_radius,
+            math.pi if climbing_left else 0.0,
+            0.0 if climbing_left else math.pi,
+            gear,
+        ),
+        Line((descend, yc), (descend, -ld + lead + 0.15), gear),
     )
     maneuvers = [Maneuver(primary, primitives)]
     if inputs.bidirectional:

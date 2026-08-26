@@ -46,7 +46,7 @@ OFFSET_KEYS = {
 PROTOTYPE_END_WALL = 0.15
 """What the prototype reports when its artificial end wall binds: a fixed 0.15 m trim."""
 
-SUPERSEDED_BY_REQUIREMENT = {Scenario.STUBBACK}
+SUPERSEDED_BY_REQUIREMENT = {Scenario.STUBBACK, Scenario.UTURN}
 """Scenarios whose maneuver no longer matches the prototype the fixture was taken from.
 
 The prototype drove stubback as a U-turn borrowed through the branch -- approach, reverse
@@ -54,8 +54,18 @@ in, pull out the far side -- which the design handoff itself flagged as unconfir
 requirement owner has since settled it: the truck starts inside the branch nose-south,
 reverses through one quarter turn onto the east side of the trunk, and drives away west.
 Different path, so the prototype's readings are no longer the same question and comparing
-against them would only pin the old shape back in place. The remaining scenarios still
-cross-check case for case.
+against them would only pin the old shape back in place.
+
+The two-way U-turn went the same way: the prototype drove both maneuvers up an outer aisle
+and back down the shared middle one, and the requirement owner has since put it the other
+way round -- out of the middle, back into an outer. Same circle, opposite way round, and in
+D gear that swings the rear outer corner into the open turning head instead of at the outer
+wall, so the readings move.
+
+That leaves the right-angle and crossback cases carrying the cross-check on their own. It is
+worth saying plainly that half the fixture no longer applies: what it still proves is that
+the region builder, the sampling and the mirror agree with an independent implementation, and
+it proves that over fewer shapes than it used to.
 """
 
 
@@ -107,7 +117,7 @@ def test_geometry_layer_matches_the_prototype_case_for_case(monkeypatch):
         actual = evaluate(inputs, dims, offsets, steps, detail=True).clearance
         assert actual == pytest.approx(case["clearance"], abs=1e-6), case
         compared += 1
-    assert compared > 170, "对拍用例太少，夹具可能没重新生成"
+    assert compared > 100, "对拍用例太少，夹具可能没重新生成"
 
 
 def test_padded_end_walls_only_ever_loosen_the_result():
@@ -263,25 +273,39 @@ def test_widening_the_road_never_tightens_the_clearance():
         previous = result.min_clearance
 
 
-def test_bidirectional_uturn_can_never_beat_the_one_way_layout():
-    """Two-way shares the middle aisle, so symmetry pins its offset to zero and the
+def test_the_two_way_uturn_leaves_the_middle_aisle_and_returns_to_an_outer_one():
+    """Both maneuvers set off up the shared middle aisle and come back down opposite outers.
 
-    feasible set is a strict subset of the one-way case.
+    They used to run it the other way -- up an outer, down the middle -- which put the two of
+    them finishing nose to nose in the aisle they share. Same circle either way; what changes
+    is which way round it is driven, and in D gear that decides whether the rear outer corner
+    swings at the outer wall or out into the open turning head.
     """
 
-    for extreme in (False, True):
-        values = [
-            solve_scenario(
-                _inputs(
-                    scenario=Scenario.UTURN, bidirectional=bidirectional,
-                    extreme=extreme, mode=SolveMode.CHECK,
-                ),
-                RoadDimensions(),
-            ).min_clearance
-            for bidirectional in (False, True)
-        ]
-        assert values[1] <= values[0] + 1e-9
-    assert values[1] < values[0]
+    result = solve_scenario(
+        _inputs(scenario=Scenario.UTURN, bidirectional=True, mode=SolveMode.FORWARD),
+        RoadDimensions(),
+    )
+    pitch = result.dims.w + result.dims.b
+    finishes = []
+    for maneuver in result.layout.maneuvers:
+        samples = sample_poses(maneuver.primitives, DIMENSIONS, FINE)
+        assert samples.x[0] == pytest.approx(0.0, abs=1e-6), "起点必须在中巷"
+        finishes.append(float(samples.x[-1]))
+    assert len(finishes) == 2
+    assert sorted(finishes) == pytest.approx([-pitch, pitch], abs=2e-3)
+
+
+def test_the_two_way_uturn_pins_the_shared_middle_aisle():
+    """Only the outer aisles may be offset; the middle one is driven by both maneuvers.
+
+    Offsetting it would move it one way for one maneuver and the other way for its mirror.
+    """
+
+    inputs = _inputs(scenario=Scenario.UTURN, bidirectional=True, extreme=True)
+    keys = {spec.key for spec in offset_specs(inputs, RoadDimensions())}
+    assert "eo" in keys
+    assert not {"e1", "e2"} & keys
 
 
 def test_uturn_that_cannot_hold_the_radius_says_how_wide_it_must_be():
