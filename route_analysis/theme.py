@@ -256,6 +256,29 @@ QToolButton#scenarioSegment:checked {{
     font-weight: 700;
 }}
 QToolButton#scenarioSegment:disabled {{ color: {TEXT_FAINT}; background: {HEADER_BASE}; }}
+QToolButton#scenarioPin {{
+    min-height: 22px;
+    padding: 1px 6px;
+    border: 1px solid {INPUT_BORDER};
+    border-radius: 4px;
+    background: {CARD};
+    color: {TEXT_MUTED};
+    font-size: 11px;
+}}
+QToolButton#scenarioPin:checked {{
+    background: {ACCENT_TINT};
+    border-color: {ACCENT_BORDER};
+    color: {ACCENT_DEEP};
+    font-weight: 700;
+}}
+QLabel#scenarioSharedTag {{
+    min-height: 22px;
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    background: {HEADER_BASE};
+    color: {TEXT_MUTED};
+    font-size: 11px;
+}}
 QToolButton#scenarioCard {{
     border: 1px solid {BORDER};
     border-radius: 6px;

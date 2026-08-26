@@ -29,9 +29,16 @@ class Gear(StrEnum):
     REVERSE = "R"
 
 
-class SolveMode(StrEnum):
-    FORWARD = "fwd"
-    CHECK = "chk"
+class Condition(StrEnum):
+    """How the truck may sit in the road; the one picker that replaced 计算方向 and 工况.
+
+    ``CENTRELINE`` keeps every lateral offset at zero and solves the road. ``PARETO`` frees
+    the offsets and, on top of that, lets the operator pin any dimension or offset: what is
+    pinned is taken as given, everything else is driven to its limit.
+    """
+
+    CENTRELINE = "centreline"
+    PARETO = "pareto"
 
 
 SCENARIO_NAMES: dict[Scenario, str] = {
@@ -107,10 +114,9 @@ class ScenarioInputs:
     """Everything one estimate needs apart from the road dimensions and the offsets."""
 
     scenario: Scenario = Scenario.CORNER
-    mode: SolveMode = SolveMode.FORWARD
+    condition: Condition = Condition.CENTRELINE
     bidirectional: bool = False
     gear: Gear = Gear.DRIVE
-    extreme: bool = False
     dimensions: VehicleDimensions = field(
         default_factory=lambda: VehicleDimensions(
             width=1.23, center_front=1.545, center_rear=2.223
@@ -130,10 +136,14 @@ class ScenarioInputs:
         return self.scenario in FIXED_GEAR_SCENARIOS
 
     @property
+    def pareto(self) -> bool:
+        return self.condition is Condition.PARETO
+
+    @property
     def optimises_offsets(self) -> bool:
         """The U-turn start point is free under every condition, so it always optimises."""
 
-        return self.extreme or self.scenario is Scenario.UTURN
+        return self.pareto or self.scenario is Scenario.UTURN
 
     @property
     def radius_too_tight(self) -> bool:
@@ -163,7 +173,9 @@ class RoadDimensions:
 class Offsets:
     """Lateral offset per leg, positive towards the inside of the turn. ``yc`` is the
 
-    longitudinal start of the U-turn arc rather than a lateral shift.
+    longitudinal start of the U-turn arc rather than a lateral shift. Keys a layout does
+    not use are ignored by its builder, and a two-way layout holds its shared leg at zero
+    whatever value sits here.
     """
 
     ea: float = 0.0
@@ -181,6 +193,9 @@ class Offsets:
         return replace(self, **{key: value})
 
 
+CENTRED = Offsets()
+"""Every leg on its centreline and the U-turn arc starting at the aisle mouth."""
+
 OFFSET_LABELS: dict[str, str] = {
     "ea": "进入道偏移",
     "eb": "驶出道偏移",
@@ -193,6 +208,98 @@ OFFSET_LABELS: dict[str, str] = {
     "eo": "外侧巷道偏移",
     "yc": "起弯点",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class Pins:
+    """Which road dimensions and offsets the operator has taken over from the solver.
+
+    Only the Pareto condition reads them. A pinned key keeps the value the operator typed;
+    every other solved dimension is driven to its limit around it and every other offset is
+    optimised. Shared-leg offsets in a two-way layout are never pinned: geometry holds them
+    at zero regardless.
+    """
+
+    dims: frozenset[str] = frozenset()
+    offsets: frozenset[str] = frozenset()
+
+    @classmethod
+    def all_dims(cls, scenario: Scenario) -> Pins:
+        """Every solved dimension pinned: nothing left to solve, the road is simply checked."""
+
+        return cls(dims=frozenset(SOLVED_KEYS[scenario]))
+
+    def with_dim(self, key: str, pinned: bool) -> Pins:
+        dims = self.dims | {key} if pinned else self.dims - {key}
+        return replace(self, dims=frozenset(dims))
+
+    def with_offset(self, key: str, pinned: bool) -> Pins:
+        offsets = self.offsets | {key} if pinned else self.offsets - {key}
+        return replace(self, offsets=frozenset(offsets))
+
+    @property
+    def lateral_offsets(self) -> frozenset[str]:
+        """The pinned offsets that move a leg sideways; ``yc`` slides along the aisle."""
+
+        return self.offsets - {"yc"}
+
+
+NO_PINS = Pins()
+"""Nothing pinned; the default the solver reads when no operator input is involved."""
+
+
+@dataclass(frozen=True, slots=True)
+class OffsetRow:
+    """One offset as the road-parameter column lists it.
+
+    ``key`` is ``None`` for the two-way U-turn middle aisle: both maneuvers share it and no
+    variable stands behind it, but the row is still listed so the layout reads complete.
+    ``shared`` rows are held at zero by geometry and are shown disabled.
+    """
+
+    key: str | None
+    label: str
+    shared: bool = False
+
+
+def offset_rows(scenario: Scenario, *, bidirectional: bool) -> tuple[OffsetRow, ...]:
+    """Every leg's offset for this layout, in the order the sidebar lists them.
+
+    Two-way layouts share one leg between the mirrored maneuvers, and a leg that carries
+    both cannot lean one way for one and the other way for the other, so that row is fixed
+    at zero. Names follow ``dimension_label``: an L junction's entry leg is a T junction's
+    trunk.
+    """
+
+    if scenario is Scenario.CORNER:
+        if bidirectional:
+            return (OffsetRow("ea", "主路偏移"), OffsetRow("eb", "支路偏移", shared=True))
+        return (OffsetRow("ea", "进入道偏移"), OffsetRow("eb", "驶出道偏移"))
+    if scenario is Scenario.CROSSBACK:
+        return (
+            OffsetRow("ev", "倒车道偏移", shared=bidirectional),
+            OffsetRow("eh", "转出道偏移"),
+        )
+    if scenario is Scenario.STUBBACK:
+        return (OffsetRow("a", "主路偏移"), OffsetRow("so", "支路偏移", shared=bidirectional))
+    if bidirectional:
+        return (
+            OffsetRow(None, "中巷偏移", shared=True),
+            OffsetRow("eo", "外侧巷道偏移"),
+            OffsetRow("yc", "起弯点"),
+        )
+    return (
+        OffsetRow("e1", "上行巷道偏移"),
+        OffsetRow("e2", "下行巷道偏移"),
+        OffsetRow("yc", "起弯点"),
+    )
+
+
+def offset_label(scenario: Scenario, key: str, *, bidirectional: bool) -> str:
+    for row in offset_rows(scenario, bidirectional=bidirectional):
+        if row.key == key:
+            return row.label
+    return OFFSET_LABELS.get(key, key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,7 +487,9 @@ def _stubback(
     radius = inputs.radius
     wh, wv = dims.wh, dims.wv
     ry = -offsets.a
-    sx = -(0.0 if inputs.bidirectional else offsets.so)
+    # Positive towards the inside of the turn, like every other offset: the arc centre
+    # sits east of the branch leg, so a positive branch offset moves the leg east.
+    sx = 0.0 if inputs.bidirectional else offsets.so
     length = vehicle.center_front + vehicle.center_rear
     lx = abs(sx) + radius + length + 1.2
     lxx = lx + CAP_PAD
@@ -527,8 +636,8 @@ def variant_name(inputs: ScenarioInputs) -> str:
     else:
         core = f"{inputs.effective_gear.value}档U型转弯"
     condition = (
-        "极限工况（可不在道路中心线行驶）"
-        if inputs.extreme
+        "帕累托极限（可不在道路中心线行驶）"
+        if inputs.pareto
         else "车辆必须在道路中心线行驶"
     )
     return f"{direction}{core} · {condition}"

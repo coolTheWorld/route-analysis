@@ -11,25 +11,30 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from itertools import product
 
 import numpy as np
 import shapely
 from shapely.geometry import LinearRing, Polygon
 
+from route_analysis import scenario_geometry
 from route_analysis.clearance_geometry import corner_radii
 from route_analysis.models import ClearanceStatus, VehicleDimensions
 from route_analysis.scenario_geometry import (
+    CENTRED,
+    NO_PINS,
     SOLVED_KEYS,
+    Condition,
     Gear,
     Line,
     Offsets,
+    Pins,
     Point,
     Primitive,
     RoadDimensions,
     Scenario,
     ScenarioInputs,
     ScenarioLayout,
-    SolveMode,
     build_layout,
 )
 from route_analysis.turn_radius import CornerRadiusKind
@@ -51,7 +56,15 @@ has given up much ground.
 SHRINK_LEVELS = 7
 """Halvings of the shrink step; the last resolves to about 20 mm, which ``_tighten`` refines."""
 TIGHTEN_STEPS = 12
-GUARD_ROUNDS = 3
+GUARD_ROUNDS = 6
+GUARD_GAIN = 2.0
+"""The guard widens every solved dimension by the shortfall times this, plus a hair.
+
+The coarse search over-reads feasibility by a few centimetres and one unit of shortfall
+per round closed the gap too slowly: three rounds left the centreline road for a two-way
+U-turn with a pinned aisle still short, and the Pareto solve then fell back onto it as
+"feasible by construction".
+"""
 BAND_SAMPLES = 24
 MIN_PENETRATION = 1e-3
 
@@ -274,6 +287,22 @@ def evaluate_layout(
             inside = shapely.contains_xy(region, samples.x, samples.y)
             if not inside.all():
                 values[~inside] = -values[~inside] - MIN_PENETRATION
+            # A body that crosses a wall while its centre is still inside reads a flat 0.0
+            # from the ring distance. Flat is fatal to the offset descent: every probe reads
+            # the same, so it never moves off a start that sits in the breach. Without the
+            # centreline cap -- which a pinned dimension or offset removes -- the search does
+            # start there, so give it a slope: how far the deepest corner sits outside.
+            crossing = inside & (values <= 0.0)
+            if crossing.any():
+                corner_points = shapely.points(samples.corners[crossing].reshape(-1, 2))
+                depth = shapely.distance(corner_points, region).reshape(-1, 4).max(axis=1)
+                for slot, pose in enumerate(np.flatnonzero(crossing)):
+                    if depth[slot] <= 0.0:
+                        # Every corner inside yet the ring is crossed: a concave vertex of
+                        # the region pokes into the body. Rare, and only these few poses
+                        # pay for the exact measurement.
+                        depth[slot] = _vertex_penetration(samples.corners[pose], region_coords)
+                values[crossing] = -np.maximum(depth, MIN_PENETRATION)
         index: int = int(values.argmin())
         if float(values[index]) < best.clearance:
             best = _describe(
@@ -343,8 +372,13 @@ class OffsetSpec:
     high: float
 
 
-def offset_specs(inputs: ScenarioInputs, dims: RoadDimensions) -> tuple[OffsetSpec, ...]:
-    """Which offsets are free to move under these inputs, and how far each may travel."""
+def offset_specs(
+    inputs: ScenarioInputs, dims: RoadDimensions, pins: Pins = NO_PINS
+) -> tuple[OffsetSpec, ...]:
+    """Which offsets are free to move under these inputs, and how far each may travel.
+
+    A pinned offset is not free: it keeps the operator's value and drops out of the list.
+    """
 
     half = inputs.dimensions.width / 2
 
@@ -354,8 +388,8 @@ def offset_specs(inputs: ScenarioInputs, dims: RoadDimensions) -> tuple[OffsetSp
     specs: list[OffsetSpec] = []
     if inputs.scenario is Scenario.UTURN:
         specs.append(OffsetSpec("yc", -1.4, max(0.4, dims.d - 0.15)))
-    if not inputs.extreme:
-        return tuple(specs)
+    if not inputs.pareto:
+        return tuple(spec for spec in specs if spec.key not in pins.offsets)
     if inputs.scenario is Scenario.CORNER:
         specs.append(OffsetSpec("ea", -room(dims.wa), room(dims.wa)))
         if not inputs.bidirectional:
@@ -373,11 +407,34 @@ def offset_specs(inputs: ScenarioInputs, dims: RoadDimensions) -> tuple[OffsetSp
         specs.append(OffsetSpec("e2", -room(dims.w), room(dims.w)))
     else:
         specs.append(OffsetSpec("eo", -room(dims.w), room(dims.w)))
-    return tuple(specs)
+    return tuple(spec for spec in specs if spec.key not in pins.offsets)
 
 
-def initial_offsets(inputs: ScenarioInputs) -> Offsets:
-    return Offsets(yc=0.25 if inputs.scenario is Scenario.UTURN else 0.0)
+def relevant_pins(inputs: ScenarioInputs, pins: Pins) -> Pins:
+    """Drop pins that name nothing this layout solves or frees.
+
+    A pinned shared-leg offset, or a dimension another scenario owns, must not change the
+    answer: geometry already ignores the value, so the pin has to be ignored too --
+    otherwise it would still count as "a lateral offset is pinned" and lift the centreline
+    cap for no reason. The sidebar never offers those pins; the API is kept honest here.
+    """
+
+    free = {spec.key for spec in offset_specs(inputs, RoadDimensions())}
+    return Pins(
+        dims=pins.dims & set(SOLVED_KEYS[inputs.scenario]),
+        offsets=pins.offsets & free,
+    )
+
+
+def initial_offsets(
+    inputs: ScenarioInputs, given: Offsets = CENTRED, pins: Pins = NO_PINS
+) -> Offsets:
+    """Where the offset search starts: centred, except that pinned keys keep their value."""
+
+    start = Offsets(yc=0.25 if inputs.scenario is Scenario.UTURN else 0.0)
+    for key in pins.offsets:
+        start = start.with_value(key, getattr(given, key))
+    return start
 
 
 def optimise_offsets(
@@ -386,17 +443,72 @@ def optimise_offsets(
     steps: Steps,
     *,
     cheap: bool,
+    given: Offsets = CENTRED,
+    pins: Pins = NO_PINS,
 ) -> tuple[Offsets, float]:
-    """Coordinate descent: scan one variable at a time, shrink its bracket, repeat."""
+    """Coordinate descent: scan one variable at a time, shrink its bracket, repeat.
 
-    specs = offset_specs(inputs, dims)
-    offsets = initial_offsets(inputs)
+    The cheap pass is what the search calls hundreds of times: one descent at the given
+    resolution. The reported pass finds the basin at coarse resolution -- descending from
+    the centred start and, when a coarse joint grid shows a clearly different corner,
+    from there as well -- and only then polishes the winner at ``steps``: one narrowed
+    axis round and a scan along the diagonals of every pair of offsets, which is where a
+    ridge between two coupled legs leaves the axis scans a few centimetres short.
+    """
+
+    specs = offset_specs(inputs, dims, pins)
+    start = initial_offsets(inputs, given, pins)
     if not specs:
-        return offsets, evaluate(inputs, dims, offsets, steps).clearance
-    brackets = [(spec.low, spec.high) for spec in specs]
+        return start, evaluate(inputs, dims, start, steps).clearance
+    if cheap:
+        return _descend_offsets(inputs, dims, steps, specs, start, rounds=2, samples=5)
+    centred = _descend_offsets(inputs, dims, COARSE, specs, start, rounds=3, samples=9)[0]
+    candidates = [start, centred]
+    if len(specs) >= 2:
+        seed = _seed_offsets(inputs, dims, start, specs)
+        if seed is not None:
+            candidates.append(
+                _descend_offsets(inputs, dims, COARSE, specs, seed, rounds=2, samples=9)[0]
+            )
+    # The coarse winner is only a guess at the fine landscape: the centred start stays a
+    # candidate, or a coarse peak a few centimetres off the true one loses the threshold
+    # the centreline road already met. For a U-turn that road met it at *its* start of
+    # arc, not at the default one, so the centreline optimum is a candidate as well --
+    # the feasible pocket of the arc start can be narrower than the coarse grid step.
+    if inputs.pareto and inputs.scenario is Scenario.UTURN:
+        centreline = replace(inputs, condition=Condition.CENTRELINE)
+        kept = Pins(offsets=pins.offsets & {"yc"})
+        candidates.append(_report_clearance(centreline, dims, given, kept)[0])
+    offsets = max(candidates, key=lambda item: evaluate(inputs, dims, item, steps).clearance)
+    offsets, best = _descend_offsets(
+        inputs, dims, steps, specs, offsets, rounds=2, samples=9, bracket=DIAGONAL_FRACTION
+    )
+    return _diagonal_pass(inputs, dims, steps, specs, offsets, best, DIAGONAL_SAMPLES)
+
+
+def _descend_offsets(
+    inputs: ScenarioInputs,
+    dims: RoadDimensions,
+    steps: Steps,
+    specs: tuple[OffsetSpec, ...],
+    offsets: Offsets,
+    *,
+    rounds: int,
+    samples: int,
+    bracket: float = 1.0,
+) -> tuple[Offsets, float]:
+    """``bracket`` narrows the first scan to that fraction of each range around the start."""
+
+    brackets = []
+    for spec in specs:
+        half = (spec.high - spec.low) * bracket / 2
+        centre = getattr(offsets, spec.key)
+        brackets.append(
+            (spec.low, spec.high)
+            if bracket >= 1.0
+            else (max(spec.low, centre - half), min(spec.high, centre + half))
+        )
     best = evaluate(inputs, dims, offsets, steps).clearance
-    rounds = 2 if cheap else 3
-    samples = 5 if cheap else 9
     for _ in range(rounds):
         for slot, spec in enumerate(specs):
             low, high = brackets[slot]
@@ -416,11 +528,117 @@ def optimise_offsets(
     return offsets, best
 
 
-def _feasible(inputs: ScenarioInputs, dims: RoadDimensions) -> bool:
+def _diagonal_pass(
+    inputs: ScenarioInputs,
+    dims: RoadDimensions,
+    steps: Steps,
+    specs: tuple[OffsetSpec, ...],
+    offsets: Offsets,
+    best: float,
+    samples: int,
+) -> tuple[Offsets, float]:
+    """Scan along the diagonals of every pair of offsets from where the axes stopped.
+
+    Where two legs trade against each other the optimum lies on a ridge that runs
+    diagonally through the offset plane, and a scan along one axis at a time zig-zags up
+    it in ever smaller steps until the bracket closes -- stopping a few centimetres short.
+    That short-fall is enough for the same road to read safe from the solve and warning
+    from the full-pinned check of the very numbers the solve reported. One pass along
+    each pair's two diagonals reaches the ridge the axes cannot.
+    """
+
+    for first in range(len(specs)):
+        for second in range(first + 1, len(specs)):
+            a, b = specs[first], specs[second]
+            span_a = (a.high - a.low) * DIAGONAL_FRACTION
+            span_b = (b.high - b.low) * DIAGONAL_FRACTION
+            for sign in (1.0, -1.0):
+                base_a = getattr(offsets, a.key)
+                base_b = getattr(offsets, b.key)
+                chosen = offsets
+                for step in range(-samples, samples + 1):
+                    if step == 0:
+                        continue
+                    t = step / samples
+                    candidate = offsets.with_value(
+                        a.key, min(max(base_a + span_a * t, a.low), a.high)
+                    ).with_value(
+                        b.key, min(max(base_b + sign * span_b * t, b.low), b.high)
+                    )
+                    probe = evaluate(inputs, dims, candidate, steps)
+                    if probe.clearance > best + 1e-6:
+                        best = probe.clearance
+                        chosen = candidate
+                offsets = chosen
+    return offsets, best
+
+
+SEED_POINTS = 4
+"""Joint grid points per free offset the reported pass starts from, bounds included."""
+SEED_MARGIN = 0.01
+"""How much better (m) a grid corner must read before it earns a descent of its own."""
+DIAGONAL_FRACTION = 0.28
+"""Half-span of the closing diagonal scan, as a fraction of each offset's range."""
+DIAGONAL_SAMPLES = 6
+"""Probes per side along each diagonal of the closing scan."""
+
+
+def _seed_offsets(
+    inputs: ScenarioInputs,
+    dims: RoadDimensions,
+    start: Offsets,
+    specs: tuple[OffsetSpec, ...],
+) -> Offsets | None:
+    """The best corner of a coarse joint grid, or ``None`` if the start already wins.
+
+    Coordinate descent walks one axis at a time and stops on the first ridge it meets.
+    With the legs coupled -- a T junction's trunk offset and branch offset trade against
+    each other -- the ridge it stops on depends on where it started, and the cheap search
+    pass and the reported pass can then land in different basins: the search accepts a
+    road on the strength of one basin and the report reads the other, below threshold.
+    A joint grid at coarse resolution is cheap enough here (this pass runs a handful of
+    times per solve, not hundreds). The seed is a second start, not a replacement: a
+    better corner does not guarantee a better basin, so both descents run -- at coarse
+    resolution -- and the higher finish is the one polished.
+    """
+
+    if len(specs) > 3:
+        return None
+    axes = [
+        [
+            spec.low + (spec.high - spec.low) * step / (SEED_POINTS - 1)
+            for step in range(SEED_POINTS)
+        ]
+        for spec in specs
+    ]
+    seed = None
+    # A corner that only just beats the start is the same basin seen at coarse
+    # resolution; the descent from the start reaches it anyway.
+    seed_best = evaluate(inputs, dims, start, COARSE).clearance + SEED_MARGIN
+    for values in product(*axes):
+        candidate = start
+        for spec, value in zip(specs, values, strict=True):
+            candidate = candidate.with_value(spec.key, value)
+        clearance = evaluate(inputs, dims, candidate, COARSE).clearance
+        if clearance > seed_best + 1e-6:
+            seed_best = clearance
+            seed = candidate
+    return seed
+
+
+def _feasible(
+    inputs: ScenarioInputs, dims: RoadDimensions, given: Offsets, pins: Pins
+) -> bool:
     target = inputs.threshold - FEASIBLE_SLACK
     if inputs.optimises_offsets:
-        return optimise_offsets(inputs, dims, COARSE, cheap=True)[1] >= target
-    return evaluate(inputs, dims, initial_offsets(inputs), COARSE).clearance >= target
+        return (
+            optimise_offsets(inputs, dims, COARSE, cheap=True, given=given, pins=pins)[1]
+            >= target
+        )
+    return (
+        evaluate(inputs, dims, initial_offsets(inputs, given, pins), COARSE).clearance
+        >= target
+    )
 
 
 def _shrink_wrap(
@@ -428,6 +646,8 @@ def _shrink_wrap(
     dims: RoadDimensions,
     keys: tuple[str, ...],
     brackets: dict[str, tuple[float, float]],
+    given: Offsets,
+    pins: Pins,
 ) -> RoadDimensions:
     """Draw every solved dimension in at the same rate until each one meets its own wall.
 
@@ -461,7 +681,7 @@ def _shrink_wrap(
                 candidate = max(brackets[key][0], current - step)
                 if candidate >= current - 1e-9:
                     continue
-                if _feasible(inputs, dims.with_value(key, candidate)):
+                if _feasible(inputs, dims.with_value(key, candidate), given, pins):
                     dims = dims.with_value(key, candidate)
                     moved = True
         step /= 2.0
@@ -481,7 +701,7 @@ class ForwardSolution:
 
 
 def _centreline_ceiling(
-    inputs: ScenarioInputs, given: RoadDimensions
+    inputs: ScenarioInputs, given: RoadDimensions, given_offsets: Offsets, pins: Pins
 ) -> RoadDimensions | None:
     """The centreline answer, which caps the extreme one dimension by dimension.
 
@@ -501,19 +721,41 @@ def _centreline_ceiling(
     in exchange for a 10 cm deeper dip. So the extreme condition now reports what offsets
     buy *on top of* the centreline road, not a different road arrived at by trading one
     dimension away for another.
+
+    Pinned dimensions stay pinned in the centreline solve too, so the cap is the centreline
+    road built around the same givens. A pinned lateral offset breaks the argument -- the
+    truck is no longer free to stay on the centreline -- so no cap applies then. A pinned
+    start-of-arc is carried across: the U-turn arc start is free under both conditions.
     """
 
-    if not inputs.extreme:
+    if not inputs.pareto or pins.lateral_offsets:
         return None
-    return solve_forward(replace(inputs, extreme=False), given).dims
+    return solve_forward(
+        replace(inputs, condition=Condition.CENTRELINE),
+        given,
+        given_offsets,
+        Pins(dims=pins.dims, offsets=pins.offsets & {"yc"}),
+    ).dims
 
 
-def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolution:
+def solve_forward(
+    inputs: ScenarioInputs,
+    given: RoadDimensions,
+    given_offsets: Offsets = CENTRED,
+    pins: Pins = NO_PINS,
+) -> ForwardSolution:
     """A set of road dimensions none of which can shrink alone. The answer sits on the
 
-    Pareto frontier and is not unique.
+    Pareto frontier and is not unique. Pinned dimensions keep their given value and the
+    rest are driven to their limit around them; pinned offsets are held where the operator
+    put them. With everything pinned there is nothing to solve and the givens are reported
+    as they are.
     """
 
+    pins = relevant_pins(inputs, pins)
+    keys = tuple(key for key in SOLVED_KEYS[inputs.scenario] if key not in pins.dims)
+    if not keys:
+        return ForwardSolution(given, _report_clearance(inputs, given, given_offsets, pins)[1])
     vehicle = inputs.dimensions
     width_low = vehicle.width + 2 * inputs.threshold + 0.005
     rear_outer = math.hypot(inputs.radius + vehicle.width / 2, vehicle.center_rear)
@@ -532,8 +774,7 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
         ),
         "d": (0.25, inputs.radius + lane_seed + vehicle.center_rear + inputs.threshold + 3),
     }
-    keys = SOLVED_KEYS[inputs.scenario]
-    cap = _centreline_ceiling(inputs, given)
+    cap = _centreline_ceiling(inputs, given, given_offsets, pins)
     if cap is not None:
         brackets = {
             key: (low, max(low, min(high, getattr(cap, key))) if key in keys else high)
@@ -543,8 +784,8 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
         given,
         **{key: brackets[key][1] for key in keys},
     )
-    ceiling = _report_clearance(inputs, dims)[1]
-    if not _feasible(inputs, dims):
+    ceiling = _report_clearance(inputs, dims, given_offsets, pins)[1]
+    if not _feasible(inputs, dims, given_offsets, pins):
         if cap is not None:
             # The centreline road is feasible under an extreme condition by construction,
             # every offset being free to stay at zero, so report it rather than claim there
@@ -553,12 +794,12 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
             # coarse offset search under-reads what the offsets can actually reach.
             return ForwardSolution(dims, ceiling)
         return ForwardSolution(None, ceiling)
-    dims = _shrink_wrap(inputs, dims, keys, brackets)
-    check = _report_clearance(inputs, dims)[1]
+    dims = _shrink_wrap(inputs, dims, keys, brackets, given_offsets, pins)
+    check = _report_clearance(inputs, dims, given_offsets, pins)[1]
     for _ in range(GUARD_ROUNDS):
         if check >= inputs.threshold:
             break
-        bump = (inputs.threshold - check) + 0.006
+        bump = GUARD_GAIN * (inputs.threshold - check) + 0.006
         dims = replace(
             dims,
             **{
@@ -566,24 +807,48 @@ def solve_forward(inputs: ScenarioInputs, given: RoadDimensions) -> ForwardSolut
                 for key in keys
             },
         )
-        check = _report_clearance(inputs, dims)[1]
+        check = _report_clearance(inputs, dims, given_offsets, pins)[1]
     if check < inputs.threshold and cap is not None:
         # Capped at the centreline road, the bump has nowhere left to climb, so it can run
         # out of rounds still short. That ceiling is feasible by construction, so fall back
         # onto it rather than report a road that does not make the threshold.
         dims = replace(dims, **{key: brackets[key][1] for key in keys})
-    return ForwardSolution(_tighten(inputs, dims, keys, brackets), ceiling)
+    return ForwardSolution(
+        _tighten(inputs, dims, keys, brackets, given_offsets, pins), ceiling
+    )
+
+
+_REPORT_CACHE: dict[
+    tuple[ScenarioInputs, RoadDimensions, Offsets, Pins, float], tuple[Offsets, float]
+] = {}
+REPORT_CACHE_SIZE = 256
 
 
 def _report_clearance(
-    inputs: ScenarioInputs, dims: RoadDimensions
+    inputs: ScenarioInputs, dims: RoadDimensions, given: Offsets, pins: Pins
 ) -> tuple[Offsets, float]:
-    """The evaluation that gets reported; extreme conditions and U-turns optimise first."""
+    """The evaluation that gets reported; the Pareto condition and U-turns optimise first.
 
+    One solve asks for the same road several times over -- the guard's last check and
+    the tightening's first read, the tightening's last read and the final report -- and
+    each reported pass is the expensive one, so the answer is kept for the exact inputs.
+    """
+
+    # The end-wall padding is module state the fixture cross-check patches; it shapes the
+    # region, so it belongs in the key.
+    key = (inputs, dims, given, pins, scenario_geometry.CAP_PAD)
+    cached = _REPORT_CACHE.get(key)
+    if cached is not None:
+        return cached
     if inputs.optimises_offsets:
-        return optimise_offsets(inputs, dims, FINE, cheap=False)
-    offsets = initial_offsets(inputs)
-    return offsets, evaluate(inputs, dims, offsets, FINE).clearance
+        result = optimise_offsets(inputs, dims, FINE, cheap=False, given=given, pins=pins)
+    else:
+        offsets = initial_offsets(inputs, given, pins)
+        result = offsets, evaluate(inputs, dims, offsets, FINE).clearance
+    if len(_REPORT_CACHE) >= REPORT_CACHE_SIZE:
+        _REPORT_CACHE.clear()
+    _REPORT_CACHE[key] = result
+    return result
 
 
 def _clamp(offsets: Offsets, specs: tuple[OffsetSpec, ...]) -> Offsets:
@@ -598,6 +863,8 @@ def _tighten(
     dims: RoadDimensions,
     keys: tuple[str, ...],
     brackets: dict[str, tuple[float, float]],
+    given: Offsets,
+    pins: Pins,
 ) -> RoadDimensions:
     """Squeeze out the slack the coarse search left behind.
 
@@ -611,7 +878,7 @@ def _tighten(
     fit.
     """
 
-    offsets, before = _report_clearance(inputs, dims)
+    offsets, before = _report_clearance(inputs, dims, given, pins)
     if before < inputs.threshold:
         return dims
     original = dims
@@ -620,7 +887,7 @@ def _tighten(
         current = getattr(dims, key)
         if current - low < 1e-3:
             continue
-        frozen = _clamp(offsets, offset_specs(inputs, dims))
+        frozen = _clamp(offsets, offset_specs(inputs, dims, pins))
         floor = evaluate(inputs, dims.with_value(key, low), frozen, FINE)
         if floor.clearance >= inputs.threshold:
             dims = dims.with_value(key, low)
@@ -629,13 +896,13 @@ def _tighten(
         for _ in range(TIGHTEN_STEPS):
             middle = (lower + upper) / 2
             candidate = dims.with_value(key, middle)
-            frozen = _clamp(offsets, offset_specs(inputs, candidate))
+            frozen = _clamp(offsets, offset_specs(inputs, candidate, pins))
             if evaluate(inputs, candidate, frozen, FINE).clearance >= inputs.threshold:
                 upper = middle
             else:
                 lower = middle
         dims = dims.with_value(key, upper)
-    if _report_clearance(inputs, dims)[1] < inputs.threshold:
+    if _report_clearance(inputs, dims, given, pins)[1] < inputs.threshold:
         return original
     return dims
 
@@ -655,6 +922,9 @@ def feasible_bands(
     inputs: ScenarioInputs, dims: RoadDimensions, offsets: Offsets
 ) -> tuple[OffsetBand, ...]:
     """How far each leg alone may move from the optimum and still clear the threshold.
+
+    Every lateral offset the layout has is scanned, pinned ones included: the band is what
+    tells the operator how far a pinned leg could still be moved.
 
     The scan has to match the reporting precision and has to include the chosen offset,
     or the optimum lands outside its own feasible band: coarse sampling reads a shade
@@ -750,10 +1020,16 @@ class ScenarioResult:
     threshold_ceiling: float | None = None
     trunk_reach: float | None = None
     """出弯主路深度 for the stub scenario: measured off the sweep, not solved for."""
+    pins: Pins = NO_PINS
+    solved_keys: tuple[str, ...] = ()
+    """The dimensions this result actually solved; empty when everything was pinned or
+
+    when no answer was found.
+    """
 
     @property
     def solved(self) -> bool:
-        return self.inputs.mode is SolveMode.FORWARD and not self.infeasible
+        return bool(self.solved_keys) and not self.infeasible
 
     @property
     def margin(self) -> float:
@@ -762,25 +1038,22 @@ class ScenarioResult:
         return self.min_clearance - self.inputs.threshold
 
 
-def _centred_clearance(inputs: ScenarioInputs, dims: RoadDimensions) -> float:
+def _centred_clearance(
+    inputs: ScenarioInputs, dims: RoadDimensions, given: Offsets, pins: Pins
+) -> float:
     """The comparison row: what is left if the truck stays on the centreline after all.
 
     It sits beside the optimised reading, so a breach has to report its real negative
     depth. That means the detail path, not the search path, which reads any crossing as
-    a flat zero.
+    a flat zero. The start of the U-turn arc is chosen by the same optimiser the
+    centreline condition uses, so this row and that variant agree by construction; a
+    pinned arc start stays pinned, since it is not a lateral offset.
     """
 
-    offsets = initial_offsets(inputs)
-    specs = [spec for spec in offset_specs(inputs, dims) if spec.key == "yc"]
-    if inputs.scenario is not Scenario.UTURN or not specs:
-        return evaluate(inputs, dims, offsets, FINE, detail=True).clearance
-    spec = specs[0]
-    best = -math.inf
-    for step in range(11):
-        value = spec.low + (spec.high - spec.low) * step / 10
-        candidate = offsets.with_value("yc", value)
-        best = max(best, evaluate(inputs, dims, candidate, FINE, detail=True).clearance)
-    return best
+    centre = replace(inputs, condition=Condition.CENTRELINE)
+    kept = Pins(offsets=pins.offsets & {"yc"})
+    offsets, _ = _report_clearance(centre, dims, given, kept)
+    return evaluate(inputs, dims, offsets, FINE, detail=True).clearance
 
 
 def trunk_reach(
@@ -809,51 +1082,157 @@ def trunk_reach(
     return max(0.0, widest - branch_width / 2 + threshold)
 
 
-def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioResult:
-    """One full estimate: solve for the limiting dimensions, or check the ones given."""
+UTURN_AISLE_OFFSETS = ("e1", "e2", "eo")
+"""The offsets that move a U-turn aisle path; negative is outwards for all three."""
 
+
+def _leaning_outwards(
+    inputs: ScenarioInputs, dims: RoadDimensions, given: Offsets, pins: Pins
+) -> Offsets:
+    """The start offsets with every free aisle offset at its outer limit.
+
+    That is where the U-turn circle is widest, so it is the honest place to ask whether
+    the radius fits at all. Pinned offsets stay where the operator put them.
+    """
+
+    offsets = initial_offsets(inputs, given, pins)
+    for spec in offset_specs(inputs, dims, pins):
+        if spec.key in UTURN_AISLE_OFFSETS:
+            offsets = offsets.with_value(spec.key, spec.low)
+    return offsets
+
+
+def _required_lane_width(
+    inputs: ScenarioInputs, dims: RoadDimensions, given: Offsets, pins: Pins
+) -> float:
+    """The narrowest aisle that still holds the half circle, offsets leaning outwards.
+
+    ``2R - b`` is the answer only with the paths on their centrelines; with the aisle
+    offsets free the circle can grow into the outer walls and the aisle can be narrower.
+    Buildability is monotone in the aisle width, so bisect it rather than write a second
+    formula that has to track how much room the offsets get.
+    """
+
+    def fits(width: float) -> bool:
+        trial = dims.with_value("w", width)
+        return build_layout(inputs, trial, _leaning_outwards(inputs, trial, given, pins)).buildable
+
+    if fits(dims.w):
+        return dims.w
+    high = 2 * inputs.radius - dims.b + 1e-6
+    # A pinned offset leaning inwards shrinks the circle, so even the centreline width
+    # can fall short; widen the bracket until it holds before bisecting.
+    for _ in range(8):
+        if fits(high):
+            break
+        high += inputs.radius
+    else:
+        return high
+    low = dims.w
+    for _ in range(40):
+        middle = (low + high) / 2
+        if fits(middle):
+            high = middle
+        else:
+            low = middle
+    return high
+
+
+def _unbuildable(
+    inputs: ScenarioInputs,
+    dims: RoadDimensions,
+    offsets: Offsets,
+    layout: ScenarioLayout,
+    radii: dict[CornerRadiusKind, float],
+    pins: Pins,
+) -> ScenarioResult:
+    """The U-turn half circle does not fit between the aisles: report the width it needs."""
+
+    clearance = -0.5 - layout.radius_shortfall
+    return ScenarioResult(
+        inputs=inputs,
+        dims=dims,
+        offsets=offsets,
+        layout=layout,
+        probe=Probe(clearance=clearance),
+        status=ClearanceStatus.OUTSIDE,
+        min_clearance=clearance,
+        corner_radii=radii,
+        bottleneck="巷道宽与隔墙宽装不下最小转弯半径，这个布局画不出来。",
+        turn_radius=layout.turn_radius,
+        radius_shortfall=layout.radius_shortfall,
+        required_lane_width=_required_lane_width(inputs, dims, offsets, pins),
+        infeasible=True,
+        pins=pins,
+    )
+
+
+def solve_scenario(
+    inputs: ScenarioInputs,
+    given: RoadDimensions,
+    offsets: Offsets = CENTRED,
+    pins: Pins = NO_PINS,
+) -> ScenarioResult:
+    """One full estimate: the limiting dimensions around whatever the operator pinned.
+
+    Under the centreline condition nothing can be pinned and every lateral offset is zero,
+    so ``offsets`` and ``pins`` are ignored there. Under the Pareto condition the pinned
+    keys are taken as given; with every solved dimension pinned the road is simply checked
+    and the status is the verdict.
+    """
+
+    pins = relevant_pins(inputs, pins) if inputs.pareto else Pins()
+    if not inputs.pareto:
+        offsets = Offsets()
     radii = corner_radii(inputs.dimensions, inputs.radius)
     ceiling: float | None = None
-    if inputs.mode is SolveMode.FORWARD:
-        solution = solve_forward(inputs, given)
+    keys = tuple(key for key in SOLVED_KEYS[inputs.scenario] if key not in pins.dims)
+    if inputs.scenario is Scenario.UTURN and "w" not in keys:
+        # The aisle pitch is fixed by what the operator typed, so whether the half circle
+        # fits is settled before any search: say so with the width it would need, rather
+        # than letting the search for the head depth fail and report a generic no-answer.
+        # Free aisle offsets can lean both legs outwards and widen the circle, so the
+        # question is asked with them at their outer limit.
+        widest = _leaning_outwards(inputs, given, offsets, pins)
+        fixed = build_layout(inputs, given, widest)
+        if not fixed.buildable:
+            return _unbuildable(inputs, given, widest, fixed, radii, pins)
+    if keys:
+        solution = solve_forward(inputs, given, offsets, pins)
         if solution.dims is None:
-            layout = build_layout(inputs, given, initial_offsets(inputs))
+            start = (
+                _leaning_outwards(inputs, given, offsets, pins)
+                if inputs.scenario is Scenario.UTURN
+                else initial_offsets(inputs, offsets, pins)
+            )
+            layout = build_layout(inputs, given, start)
             return ScenarioResult(
                 inputs=inputs,
                 dims=given,
-                offsets=initial_offsets(inputs),
+                offsets=start,
                 layout=layout,
                 probe=Probe(clearance=solution.ceiling_clearance),
                 status=ClearanceStatus.UNAVAILABLE,
                 min_clearance=solution.ceiling_clearance,
                 corner_radii=radii,
-                bottleneck="在给定车辆参数下找不到可行的道路极限尺寸。",
+                bottleneck=(
+                    "在当前固定的尺寸与偏移下找不到可行的道路极限尺寸。"
+                    if pins.dims or pins.offsets
+                    else "在给定车辆参数下找不到可行的道路极限尺寸。"
+                ),
                 infeasible=True,
                 threshold_ceiling=max(0.0, solution.ceiling_clearance),
+                pins=pins,
             )
         dims = solution.dims
         ceiling = solution.ceiling_clearance
     else:
         dims = given
 
-    offsets, clearance = _report_clearance(inputs, dims)
+    offsets, _clearance = _report_clearance(inputs, dims, offsets, pins)
     layout = build_layout(inputs, dims, offsets)
     if not layout.buildable:
-        return ScenarioResult(
-            inputs=inputs,
-            dims=dims,
-            offsets=offsets,
-            layout=layout,
-            probe=Probe(clearance=clearance),
-            status=ClearanceStatus.OUTSIDE,
-            min_clearance=clearance,
-            corner_radii=radii,
-            bottleneck="巷道宽与隔墙宽装不下最小转弯半径，这个布局画不出来。",
-            turn_radius=layout.turn_radius,
-            radius_shortfall=layout.radius_shortfall,
-            required_lane_width=2 * inputs.radius - dims.b,
-            infeasible=True,
-        )
+        return _unbuildable(inputs, dims, offsets, layout, radii, pins)
 
     probe = evaluate_layout(layout, inputs.dimensions, FINE, detail=True)
     bands: tuple[OffsetBand, ...] = ()
@@ -863,8 +1242,8 @@ def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioRes
         if inputs.scenario is Scenario.STUBBACK
         else None
     )
-    if inputs.mode is SolveMode.CHECK and inputs.extreme:
-        centred = _centred_clearance(inputs, dims)
+    if inputs.pareto:
+        centred = _centred_clearance(inputs, dims, offsets, pins)
         bands = feasible_bands(inputs, dims, offsets)
     return ScenarioResult(
         inputs=inputs,
@@ -881,6 +1260,8 @@ def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioRes
         bands=bands,
         threshold_ceiling=ceiling,
         trunk_reach=reach,
+        pins=pins,
+        solved_keys=keys,
     )
 
 

@@ -29,7 +29,7 @@ from route_analysis.models import (
 )
 from route_analysis.parsing import parse_command_details
 from route_analysis.path_details_panel import PathDetailsPanel
-from route_analysis.scenario_geometry import Scenario, SolveMode
+from route_analysis.scenario_geometry import Condition, Scenario
 from route_analysis.scenario_panel import ScenarioPanel
 from route_analysis.storage import LaneLayout
 from route_analysis.theme import APPLICATION_STYLESHEET, select_cjk_font
@@ -376,9 +376,9 @@ def render_scenario(app: QApplication, output: Path) -> bool:
     window.show()
     app.processEvents()
     panel.select_variant(
-        scenario=Scenario.UTURN, mode=SolveMode.CHECK, extreme=True, bidirectional=True
+        scenario=Scenario.UTURN, condition=Condition.PARETO, bidirectional=True
     )
-    _wait_for(app, lambda: panel.result is not None and panel.result.inputs.extreme)
+    _wait_for(app, lambda: panel.result is not None and panel.result.inputs.pareto)
     scenario_output = output.with_name(f"{output.stem}-scenario{output.suffix}")
     return bool(window.grab().save(str(scenario_output)))
 

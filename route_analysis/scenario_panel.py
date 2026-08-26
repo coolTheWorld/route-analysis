@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QRectF, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QIcon,
@@ -38,16 +38,17 @@ from route_analysis.clearance_graphics import format_length
 from route_analysis.control_panel import CORNER_LABELS
 from route_analysis.models import ClearanceStatus, VehicleDimensions
 from route_analysis.scenario_geometry import (
-    OFFSET_LABELS,
     SCENARIO_NAMES,
     SCENARIO_SUBTITLES,
-    SOLVED_KEYS,
+    Condition,
     Gear,
+    Offsets,
+    Pins,
     RoadDimensions,
     Scenario,
     ScenarioInputs,
-    SolveMode,
     dimension_label,
+    offset_rows,
     variant_name,
 )
 from route_analysis.scenario_graphics import (
@@ -59,7 +60,6 @@ from route_analysis.scenario_graphics import (
 from route_analysis.scenario_solver import (
     ManeuverTrace,
     ScenarioResult,
-    offset_specs,
     solve_scenario,
     trace_maneuvers,
 )
@@ -68,7 +68,8 @@ from route_analysis.workers import Worker
 
 SIDEBAR_WIDTH = 290
 RESULT_WIDTH = 314
-LABEL_WIDTH = 84
+LABEL_WIDTH = 96
+"""Eight CJK characters at 12 px: room for 隔墙宽（给定）, the longest caption listed."""
 DEBOUNCE_MS = 150
 RUN_FRAME_MS = 33
 RUN_CAPTION = "模拟运行"
@@ -96,7 +97,33 @@ CARD_NAMES: dict[Scenario, str] = {
 """Scenario names wrap by hand: on one line they widen the 290 px sidebar and clip it."""
 
 GIVEN_ONLY_KEYS = {"b"}
-"""Still supplied when solving forward: the divider is site fabric, not an unknown."""
+"""Always supplied, never solved: the divider is site fabric, not an unknown."""
+
+MIDDLE_ROW = "_middle"
+"""Stands in for the two-way U-turn middle aisle: no variable behind it, but listed so the
+
+layout reads complete.
+"""
+OFFSET_ROW_KEYS = ("ea", "eb", "ev", "eh", "a", "so", "e1", "e2", MIDDLE_ROW, "eo", "yc")
+"""One spin row per offset the layouts between them can list, in ``offset_rows`` order."""
+SHARED_CAPTION = "共用"
+
+PIN_CAPTION = "固定"
+PIN_WIDTH = 40
+SPIN_FLOOR = 72
+"""Pin toggle and shared tag share one width so the spin column lines up."""
+PIN_TOOLTIP = (
+    "固定：这一项按你给定的值，求解器不再改动；取消固定即交回求解器。\n改动数值会自动固定。"
+)
+CENTRELINE_HINT = "车辆沿道路中心线行驶，只凭车辆参数求出道路的极限尺寸。"
+PARETO_HINT = (
+    "车辆可偏离道路中心线。改过的尺寸或偏移即固定，其余由求解器压到极限并回填。"
+)
+CENTRELINE_ROAD_NOTE = "道路极限尺寸由求解给出，见右侧结果 →"
+PARETO_ROAD_NOTE = (
+    "未固定的项由求解器给出并回填；改动即固定，点「固定」可取消。"
+    "双向布局里共用腿的偏移恒为 0。"
+)
 
 STATUS_WORDS: dict[ClearanceStatus, tuple[str, str]] = {
     ClearanceStatus.SAFE: ("通过", "success"),
@@ -119,7 +146,13 @@ SPIN_RANGES: dict[str, tuple[float, float, float, int]] = {
     "w": (0.20, 30.00, 0.05, 2),
     "b": (0.05, 10.00, 0.05, 2),
     "d": (0.00, 60.00, 0.05, 2),
+    "offset": (-15.00, 15.00, 0.05, 2),
+    "yc": (-10.00, 60.00, 0.05, 2),
 }
+"""Offsets are deliberately not clamped to what the road can hold: an operator may type a
+
+value the leg cannot take, and the result then says so instead of the control refusing it.
+"""
 
 FOOTNOTE = (
     "偏移符号：弯道内侧为正、外侧为负。\n"
@@ -128,6 +161,37 @@ FOOTNOTE = (
 NON_UNIQUE_NOTE = (
     "各尺寸均已不可单独缩小；改变求解顺序会得到前沿上的另一组解。"
 )
+
+
+class _WheelGuard(QObject):
+    """Wheel turns only the spin box that has focus.
+
+    Scrolling the sidebar with the wheel passes over the road inputs, and a spin box
+    under the pointer would take the wheel as an edit -- which now pins the row. The
+    guard hands the wheel back to the scroll area unless the operator has clicked into
+    the box first.
+    """
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if (
+            event.type() is QEvent.Type.Wheel
+            and isinstance(watched, QWidget)
+            and not watched.hasFocus()
+        ):
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
+
+
+_WHEEL_GUARD: _WheelGuard | None = None
+"""Created with the first spin box, once a QApplication exists."""
+
+
+def _wheel_guard() -> _WheelGuard:
+    global _WHEEL_GUARD
+    if _WHEEL_GUARD is None:
+        _WHEEL_GUARD = _WheelGuard()
+    return _WHEEL_GUARD
 
 
 def _restyle(widget: QWidget, name: str, value: str) -> None:
@@ -144,7 +208,23 @@ def _spin(kind: str, value: float) -> QDoubleSpinBox:
     spin.setDecimals(decimals)
     spin.setSuffix(" m")
     spin.setKeyboardTracking(False)
+    spin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    spin.installEventFilter(_wheel_guard())
     spin.setValue(value)
+    return spin
+
+
+def _compact(spin: QDoubleSpinBox) -> QDoubleSpinBox:
+    """Let a road-row spin give up width to the pin column.
+
+    A spin box asks for the width of its widest legal value; with the pin toggle beside it
+    that request no longer fits the 290 px sidebar and the whole column gets clipped. The
+    values these rows actually show are a few metres, so the row keeps a floor well below
+    the hint and lets the layout hand the spin whatever is left.
+    """
+
+    spin.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+    spin.setMinimumWidth(SPIN_FLOOR)
     return spin
 
 
@@ -338,6 +418,8 @@ class ScenarioPanel(QWidget):
         super().__init__()
         self._inputs = ScenarioInputs()
         self._road = RoadDimensions()
+        self._offsets = Offsets()
+        self._pins = Pins()
         self._result: ScenarioResult | None = None
         self._generation = 0
         self._pool = QThreadPool(self)
@@ -368,7 +450,9 @@ class ScenarioPanel(QWidget):
         row.addWidget(self._build_results())
 
     @staticmethod
-    def _scroller(inner: QWidget, width: int, name: str) -> QScrollArea:
+    def _scroller(
+        inner: QWidget, width: int, name: str, *, takes_focus: bool = True
+    ) -> QScrollArea:
         inner.setObjectName(name)
         area = QScrollArea()
         area.setWidget(inner)
@@ -376,6 +460,13 @@ class ScenarioPanel(QWidget):
         area.setFixedWidth(width)
         area.setFrameShape(QFrame.Shape.NoFrame)
         area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        if not takes_focus:
+            # A click on a button that declines focus is offered to its ancestors, and
+            # the scroll area would take it -- pulling focus off a spin box mid-edit,
+            # committing the text and auto-pinning the row before the pin toggle itself
+            # runs. Wheel and scrollbar scrolling need no focus. The result column keeps
+            # focus so the keyboard can still scroll it.
+            area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         return area
 
     @staticmethod
@@ -388,11 +479,16 @@ class ScenarioPanel(QWidget):
         return box, layout
 
     def _labelled(
-        self, layout: QVBoxLayout, caption: str, widget: QWidget
+        self,
+        layout: QVBoxLayout,
+        caption: str,
+        widget: QWidget,
+        trailing: QWidget | None = None,
     ) -> tuple[QWidget, QLabel]:
         """Label beside control. The caption has to stay narrow or it widens the sidebar
 
-        past its 290 px and the whole column gets clipped.
+        past its 290 px and the whole column gets clipped. ``trailing`` is the pin toggle
+        the road rows carry.
         """
 
         holder = QWidget()
@@ -404,8 +500,24 @@ class ScenarioPanel(QWidget):
         label.setFixedWidth(LABEL_WIDTH)
         line.addWidget(label)
         line.addWidget(widget, 1)
+        if trailing is not None:
+            line.addWidget(trailing)
         layout.addWidget(holder)
         return holder, label
+
+    @staticmethod
+    def _pin_button() -> QToolButton:
+        button = QToolButton()
+        button.setObjectName("scenarioPin")
+        button.setText(PIN_CAPTION)
+        button.setToolTip(PIN_TOOLTIP)
+        button.setCheckable(True)
+        button.setFixedWidth(PIN_WIDTH)
+        # Tab reaches it; a mouse click must not. Taking focus from the spin would commit
+        # the text being typed before the toggle runs, auto-pinning the row, and the same
+        # click's toggle would then release it again. The toggle commits the text itself.
+        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        return button
 
     def _stacked(self, layout: QVBoxLayout, caption: str, widget: QWidget) -> QWidget:
         """Caption above the control: three CJK segments do not fit beside a caption."""
@@ -428,15 +540,15 @@ class ScenarioPanel(QWidget):
         column.setSpacing(9)
 
         box, layout = self._group("计算方向")
-        self._mode_segment = _Segment(
-            ((SolveMode.FORWARD, "求道路极限"), (SolveMode.CHECK, "校核给定道路"))
+        self._condition_segment = _Segment(
+            ((Condition.CENTRELINE, "道路中心线"), (Condition.PARETO, "帕累托极限"))
         )
-        self._mode_segment.changed.connect(self._mode_changed)
-        layout.addWidget(self._mode_segment)
-        self._mode_hint = QLabel()
-        self._mode_hint.setObjectName("scenarioHint")
-        self._mode_hint.setWordWrap(True)
-        layout.addWidget(self._mode_hint)
+        self._condition_segment.changed.connect(self._condition_changed)
+        layout.addWidget(self._condition_segment)
+        self._condition_hint = QLabel()
+        self._condition_hint.setObjectName("scenarioHint")
+        self._condition_hint.setWordWrap(True)
+        layout.addWidget(self._condition_hint)
         column.addWidget(box)
 
         box, layout = self._group("场景")
@@ -475,16 +587,6 @@ class ScenarioPanel(QWidget):
         self._fixed_gear = QLabel("R档 → D档（本场景固定）")
         self._fixed_gear.setObjectName("scenarioFixedGear")
         self._fixed_gear_row = self._stacked(layout, "档位", self._fixed_gear)
-
-        self._condition_segment = _Segment(((False, "道路中心线"), (True, "极限工况")))
-        self._condition_segment.changed.connect(self._condition_changed)
-        self._stacked(layout, "工况", self._condition_segment)
-        self._condition_hint = QLabel(
-            "极限工况允许车辆偏离道路中心线，求解器会顺带给出最优偏移。"
-        )
-        self._condition_hint.setObjectName("scenarioHint")
-        self._condition_hint.setWordWrap(True)
-        layout.addWidget(self._condition_hint)
         column.addWidget(box)
 
         box, layout = self._group("车辆参数")
@@ -527,14 +629,48 @@ class ScenarioPanel(QWidget):
         self._road_spins: dict[str, QDoubleSpinBox] = {}
         self._road_rows: dict[str, QWidget] = {}
         self._road_captions: dict[str, QLabel] = {}
+        self._road_pins: dict[str, QToolButton] = {}
         for key in ("wa", "wb", "wv", "wh", "ls", "w", "b", "d"):
-            spin = _spin(key, getattr(self._road, key))
-            spin.valueChanged.connect(self._road_changed)
+            spin = _compact(_spin(key, getattr(self._road, key)))
+            spin.valueChanged.connect(lambda _value, key=key: self._road_changed(key))
             self._road_spins[key] = spin
-            holder, road_label = self._labelled(layout, key, spin)
+            pin = self._pin_button()
+            pin.toggled.connect(lambda checked, key=key: self._dim_pin_toggled(key, checked))
+            self._road_pins[key] = pin
+            holder, road_label = self._labelled(layout, key, spin, pin)
             self._road_rows[key] = holder
             self._road_captions[key] = road_label
-        self._road_note = QLabel("道路极限尺寸由求解给出，见右侧结果 →")
+        self._offset_spins: dict[str, QDoubleSpinBox] = {}
+        self._offset_holders: dict[str, QWidget] = {}
+        self._offset_captions: dict[str, QLabel] = {}
+        self._offset_pins: dict[str, QToolButton] = {}
+        self._offset_shared: dict[str, QLabel] = {}
+        for key in OFFSET_ROW_KEYS:
+            spin = _compact(_spin("yc" if key == "yc" else "offset", 0.0))
+            spin.valueChanged.connect(lambda _value, key=key: self._offset_changed(key))
+            self._offset_spins[key] = spin
+            pin = self._pin_button()
+            pin.toggled.connect(
+                lambda checked, key=key: self._offset_pin_toggled(key, checked)
+            )
+            self._offset_pins[key] = pin
+            shared = QLabel(SHARED_CAPTION)
+            shared.setObjectName("scenarioSharedTag")
+            shared.setToolTip("两条镜像机动共用这条腿，偏移固定为 0。")
+            shared.setFixedWidth(PIN_WIDTH)
+            shared.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            shared.hide()
+            self._offset_shared[key] = shared
+            trailing = QWidget()
+            stack = QHBoxLayout(trailing)
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(0)
+            stack.addWidget(pin)
+            stack.addWidget(shared)
+            holder, offset_label = self._labelled(layout, key, spin, trailing)
+            self._offset_holders[key] = holder
+            self._offset_captions[key] = offset_label
+        self._road_note = QLabel(CENTRELINE_ROAD_NOTE)
         self._road_note.setObjectName("scenarioHint")
         self._road_note.setWordWrap(True)
         layout.addWidget(self._road_note)
@@ -545,7 +681,7 @@ class ScenarioPanel(QWidget):
         footnote.setWordWrap(True)
         column.addWidget(footnote)
         column.addStretch(1)
-        return self._scroller(inner, SIDEBAR_WIDTH, "scenarioSidebar")
+        return self._scroller(inner, SIDEBAR_WIDTH, "scenarioSidebar", takes_focus=False)
 
     def _build_plan(self) -> QWidget:
         holder = QWidget()
@@ -600,12 +736,11 @@ class ScenarioPanel(QWidget):
         column.setSpacing(9)
         self._status_card = _Card("求解状态", bar=True)
         self._dimension_card = _Card("道路极限尺寸")
-        self._detail_card = _Card("校核明细")
         self._offset_card = _Card("路径偏移")
         self._radius_card = _Card("四角转弯半径（几何精确值）")
         self._bottleneck_card = _Card("瓶颈", tone="quiet")
         for card in (
-            self._status_card, self._dimension_card, self._detail_card,
+            self._status_card, self._dimension_card,
             self._offset_card, self._radius_card, self._bottleneck_card,
         ):
             column.addWidget(card)
@@ -647,50 +782,51 @@ class ScenarioPanel(QWidget):
         self,
         *,
         scenario: Scenario | None = None,
-        mode: SolveMode | None = None,
+        condition: Condition | None = None,
         bidirectional: bool | None = None,
         gear: Gear | None = None,
-        extreme: bool | None = None,
     ) -> None:
         """Set several controls at once and schedule a single recalculation."""
 
-        self._inputs = replace(
-            self._inputs,
-            scenario=self._inputs.scenario if scenario is None else scenario,
-            mode=self._inputs.mode if mode is None else mode,
-            bidirectional=(
-                self._inputs.bidirectional if bidirectional is None else bidirectional
-            ),
-            gear=self._inputs.gear if gear is None else gear,
-            extreme=self._inputs.extreme if extreme is None else extreme,
+        self._relayout(
+            replace(
+                self._inputs,
+                scenario=self._inputs.scenario if scenario is None else scenario,
+                condition=self._inputs.condition if condition is None else condition,
+                bidirectional=(
+                    self._inputs.bidirectional if bidirectional is None else bidirectional
+                ),
+                gear=self._inputs.gear if gear is None else gear,
+            )
         )
+
+    def _relayout(self, inputs: ScenarioInputs) -> None:
+        """A different layout or condition: every pin is released.
+
+        What was pinned belonged to the road that is going away, so the new one starts
+        from the solver's answer again. Vehicle edits keep the pins -- see
+        ``_vehicle_changed``.
+        """
+
+        if inputs == self._inputs:
+            return
+        self._inputs = inputs
+        self._pins = Pins()
+        self._offsets = Offsets()
         self._sync_controls()
         self._schedule()
 
-    def _mode_changed(self, mode: SolveMode) -> None:
-        self._inputs = replace(self._inputs, mode=mode)
-        self._sync_controls()
-        self._schedule()
+    def _condition_changed(self, condition: Condition) -> None:
+        self._relayout(replace(self._inputs, condition=condition))
 
     def _scenario_changed(self, scenario: Scenario) -> None:
-        self._inputs = replace(self._inputs, scenario=scenario)
-        self._sync_controls()
-        self._schedule()
+        self._relayout(replace(self._inputs, scenario=scenario))
 
     def _direction_changed(self, bidirectional: bool) -> None:
-        self._inputs = replace(self._inputs, bidirectional=bidirectional)
-        self._sync_controls()
-        self._schedule()
+        self._relayout(replace(self._inputs, bidirectional=bidirectional))
 
     def _gear_changed(self, gear: Gear) -> None:
-        self._inputs = replace(self._inputs, gear=gear)
-        self._sync_controls()
-        self._schedule()
-
-    def _condition_changed(self, extreme: bool) -> None:
-        self._inputs = replace(self._inputs, extreme=extreme)
-        self._sync_controls()
-        self._schedule()
+        self._relayout(replace(self._inputs, gear=gear))
 
     def _vehicle_changed(self, _value: float) -> None:
         self._inputs = replace(
@@ -706,10 +842,56 @@ class ScenarioPanel(QWidget):
         self._sync_notice()
         self._schedule()
 
-    def _road_changed(self, _value: float) -> None:
-        self._road = RoadDimensions(
-            **{key: spin.value() for key, spin in self._road_spins.items()}
-        )
+    def _road_changed(self, key: str) -> None:
+        """An edited dimension is the operator's from now on, so it pins itself."""
+
+        self._road = self._road.with_value(key, self._road_spins[key].value())
+        if self._inputs.pareto and key not in GIVEN_ONLY_KEYS:
+            self._pins = self._pins.with_dim(key, True)
+            self._sync_pins()
+        self._schedule()
+
+    def _offset_changed(self, key: str) -> None:
+        if key == MIDDLE_ROW or not self._inputs.pareto:
+            return
+        self._offsets = self._offsets.with_value(key, self._offset_spins[key].value())
+        self._pins = self._pins.with_offset(key, True)
+        self._sync_pins()
+        self._schedule()
+
+    def _dim_pin_toggled(self, key: str, checked: bool) -> None:
+        """Pinning through the toggle freezes the value on screen, whatever it came from."""
+
+        spin = self._road_spins[key]
+        if checked:
+            # Text typed but not yet committed is what the operator means to pin.
+            spin.interpretText()
+        else:
+            # Releasing hands the row back to the solver; text left half-typed would
+            # commit -- and pin again -- the moment focus moved on.
+            spin.setValue(spin.value())
+        if (key in self._pins.dims) == checked:
+            return
+        if checked:
+            self._road = self._road.with_value(key, self._road_spins[key].value())
+        self._pins = self._pins.with_dim(key, checked)
+        self._sync_pins()
+        self._schedule()
+
+    def _offset_pin_toggled(self, key: str, checked: bool) -> None:
+        if key == MIDDLE_ROW:
+            return
+        spin = self._offset_spins[key]
+        if checked:
+            spin.interpretText()
+        else:
+            spin.setValue(spin.value())
+        if (key in self._pins.offsets) == checked:
+            return
+        if checked:
+            self._offsets = self._offsets.with_value(key, self._offset_spins[key].value())
+        self._pins = self._pins.with_offset(key, checked)
+        self._sync_pins()
         self._schedule()
 
     def _layers_changed(self, _checked: bool) -> None:
@@ -759,36 +941,65 @@ class ScenarioPanel(QWidget):
 
     def _sync_controls(self) -> None:
         inputs = self._inputs
-        self._mode_segment.select(inputs.mode)
+        self._condition_segment.select(inputs.condition)
         self._scenario_buttons[inputs.scenario].setChecked(True)
         self._direction_segment.select(inputs.bidirectional)
         self._gear_segment.select(inputs.effective_gear)
-        self._condition_segment.select(inputs.extreme)
         self._gear_row.setVisible(not inputs.gear_is_fixed)
         self._fixed_gear_row.setVisible(inputs.gear_is_fixed)
-        forward = inputs.mode is SolveMode.FORWARD
-        self._mode_hint.setText(
-            "只凭车辆参数求出道路的极限尺寸。"
-            if forward
-            else "再给出实际道路尺寸，判定通过 / 临界 / 越界。"
-        )
+        pareto = inputs.pareto
+        self._condition_hint.setText(PARETO_HINT if pareto else CENTRELINE_HINT)
         keys = ROAD_KEYS[inputs.scenario]
-        hidden = 0
-        for key, row in self._road_rows.items():
-            shown = key in keys and (not forward or key in GIVEN_ONLY_KEYS)
-            row.setVisible(shown)
-            if shown:
-                suffix = "（给定）" if forward else ""
-                caption = self._road_captions[key]
-                caption.setText(
-                    dimension_label(inputs.scenario, key, bidirectional=inputs.bidirectional)
-                    + suffix
-                )
-            elif key in keys:
-                hidden += 1
-        self._road_note.setVisible(bool(hidden))
+        for key, holder in self._road_rows.items():
+            given_only = key in GIVEN_ONLY_KEYS
+            shown = key in keys and (pareto or given_only)
+            holder.setVisible(shown)
+            if not shown:
+                continue
+            self._road_captions[key].setText(
+                dimension_label(inputs.scenario, key, bidirectional=inputs.bidirectional)
+                + ("（给定）" if given_only else "")
+            )
+            self._road_pins[key].setVisible(pareto and not given_only)
+        listed = (
+            {row.key or MIDDLE_ROW: row for row in
+             offset_rows(inputs.scenario, bidirectional=inputs.bidirectional)}
+            if pareto
+            else {}
+        )
+        for key, holder in self._offset_holders.items():
+            listed_row = listed.get(key)
+            holder.setVisible(listed_row is not None)
+            if listed_row is None:
+                continue
+            spin = self._offset_spins[key]
+            self._offset_captions[key].setText(listed_row.label)
+            spin.setEnabled(not listed_row.shared)
+            self._offset_pins[key].setVisible(not listed_row.shared)
+            self._offset_shared[key].setVisible(listed_row.shared)
+            if listed_row.shared:
+                spin.blockSignals(True)
+                spin.setValue(0.0)
+                spin.blockSignals(False)
+                if key != MIDDLE_ROW:
+                    self._offsets = self._offsets.with_value(key, 0.0)
+        self._road_note.setText(PARETO_ROAD_NOTE if pareto else CENTRELINE_ROAD_NOTE)
+        self._road_note.setVisible(pareto or len(keys) > len(set(keys) & GIVEN_ONLY_KEYS))
+        self._sync_pins()
         self._title.setText(variant_name(inputs))
         self._sync_notice()
+
+    def _sync_pins(self) -> None:
+        """Pin toggles follow ``self._pins``; the toggles never own the state."""
+
+        for key, pin in self._road_pins.items():
+            pin.blockSignals(True)
+            pin.setChecked(key in self._pins.dims)
+            pin.blockSignals(False)
+        for key, pin in self._offset_pins.items():
+            pin.blockSignals(True)
+            pin.setChecked(key in self._pins.offsets)
+            pin.blockSignals(False)
 
     def _sync_notice(self) -> None:
         if self._inputs.radius_too_tight:
@@ -807,8 +1018,14 @@ class ScenarioPanel(QWidget):
             self._schedule()
 
     def _schedule(self) -> None:
-        """Note the work while the tab is hidden; solve once someone is actually looking."""
+        """Note the work while the tab is hidden; solve once someone is actually looking.
 
+        The generation moves here, not only when the solve starts: a result still in
+        flight was computed from inputs that are now stale, and letting it land would
+        write the solver's values over what the operator just typed and pinned.
+        """
+
+        self._generation += 1
         self._pending = True
         if not self.isVisible():
             return
@@ -823,7 +1040,11 @@ class ScenarioPanel(QWidget):
         generation = self._generation
         inputs = self._inputs
         road = self._road
-        worker: Worker[ScenarioResult] = Worker(lambda: solve_scenario(inputs, road))
+        offsets = self._offsets
+        pins = self._pins
+        worker: Worker[ScenarioResult] = Worker(
+            lambda: solve_scenario(inputs, road, offsets, pins)
+        )
         worker.signals.succeeded.connect(
             lambda result: self._apply(generation, result)
         )
@@ -848,39 +1069,56 @@ class ScenarioPanel(QWidget):
         self.plan.set_result(result)
         self._fill_status(result)
         self._fill_dimensions(result)
-        self._fill_detail(result)
         self._fill_offsets(result)
         self._fill_radii(result)
         self._bottleneck_card.clear()
         self._bottleneck_card.set_note(result.bottleneck)
-        if result.inputs.mode is SolveMode.FORWARD and not result.infeasible:
-            self._mirror_solved_dimensions(result)
+        if not result.infeasible:
+            self._mirror_solution(result)
         self.solved.emit(result)
 
-    def _mirror_solved_dimensions(self, result: ScenarioResult) -> None:
-        """Mirror the solved dimensions into the road inputs so switching to check carries on
+    def _mirror_solution(self, result: ScenarioResult) -> None:
+        """Write what the solver chose back into the unpinned inputs.
 
-        from the answer just given.
+        The rows the operator has not taken over show the solver's answer, so the next edit
+        starts from it and pinning a row freezes the value that is actually on screen.
+        Pinned rows are left alone: they already hold the operator's value.
         """
 
-        for key in SOLVED_KEYS[result.inputs.scenario]:
-            spin = self._road_spins[key]
-            spin.blockSignals(True)
-            spin.setValue(getattr(result.dims, key))
-            spin.blockSignals(False)
-        self._road = replace(
-            self._road,
-            **{key: getattr(result.dims, key) for key in SOLVED_KEYS[result.inputs.scenario]},
-        )
+        for key in result.solved_keys:
+            if key in self._pins.dims:
+                continue
+            self._road = self._road.with_value(key, getattr(result.dims, key))
+            self._refill(self._road_spins[key], getattr(result.dims, key))
+        for row in offset_rows(result.inputs.scenario, bidirectional=result.inputs.bidirectional):
+            if row.key is None or row.shared or row.key in self._pins.offsets:
+                continue
+            value = getattr(result.offsets, row.key)
+            self._offsets = self._offsets.with_value(row.key, value)
+            self._refill(self._offset_spins[row.key], value)
+
+    @staticmethod
+    def _refill(spin: QDoubleSpinBox, value: float) -> None:
+        """Show a solver value without firing the edit path, and never over a live edit.
+
+        Keyboard tracking is off, so text being typed has not reached ``value()`` yet; a
+        refill would throw it away mid-word. Focus alone is not typing: a spin that merely
+        holds the cursor still takes the refill, or it would sit on a stale value.
+        """
+
+        if spin.hasFocus() and spin.lineEdit().isModified():
+            return
+        spin.blockSignals(True)
+        spin.setValue(value)
+        spin.blockSignals(False)
 
     # ---------- 结果卡 ----------
 
     def _fill_status(self, result: ScenarioResult) -> None:
         card = self._status_card
         card.clear()
-        forward = result.inputs.mode is SolveMode.FORWARD
         if result.infeasible:
-            card.set_title("求解状态" if forward else "判定")
+            card.set_title("求解状态")
             card.add_row("结果", "不可行", state="danger")
             card.set_state("danger")
             if result.radius_shortfall > 0 and result.required_lane_width is not None:
@@ -888,6 +1126,10 @@ class ScenarioPanel(QWidget):
                     f"巷道宽 + 隔墙宽 装不下最小转弯半径，还差 "
                     f"{format_length(result.radius_shortfall)} m；巷道至少需 "
                     f"{format_length(result.required_lane_width)} m。"
+                )
+            elif result.pins.dims or result.pins.offsets:
+                card.set_note(
+                    "在当前固定的尺寸与偏移下找不到可行解；放宽或取消部分固定再试。"
                 )
             elif result.threshold_ceiling is not None:
                 card.set_note(
@@ -897,27 +1139,44 @@ class ScenarioPanel(QWidget):
                 )
             return
         word, state = STATUS_WORDS[result.status]
-        card.set_title("求解状态" if forward else "判定")
-        card.add_row("结果", "已求解" if forward else word, state=state)
+        fits = result.solved and result.status is ClearanceStatus.SAFE
+        card.set_title("求解状态" if result.solved else "判定")
+        card.add_row("结果", "已求解" if fits else word, state=state)
         card.add_row("最小净距", f"{format_length(result.min_clearance)} m", state=state)
+        card.add_row("相对阈值余量", f"{format_length(result.margin, signed=True)} m")
         card.set_state(state)
-        card.set_note(
-            NON_UNIQUE_NOTE
-            if forward
-            else f"相对阈值余量 {format_length(result.margin, signed=True)} m。"
-        )
+        pinned = result.pins.dims or result.pins.offsets
+        if result.solved and not fits:
+            card.set_note("求解停在阈值以下：放宽或取消部分固定，或降低净距阈值。")
+        elif result.solved:
+            card.set_note(NON_UNIQUE_NOTE + (" 已固定的项按给定值。" if pinned else ""))
+        elif result.inputs.pareto:
+            card.set_note("全部尺寸已固定，这是对给定道路的判定。")
+        else:
+            card.set_note("")
 
     def _fill_dimensions(self, result: ScenarioResult) -> None:
         card = self._dimension_card
         card.clear()
-        forward = result.inputs.mode is SolveMode.FORWARD
-        card.set_title("一组最小可行尺寸（非唯一）" if forward else "给定道路尺寸")
-        solved = set(SOLVED_KEYS[result.inputs.scenario]) if forward else set()
+        if result.solved:
+            card.set_title("一组最小可行尺寸（非唯一）")
+        elif result.infeasible:
+            card.set_title("道路尺寸（未求解）")
+        else:
+            card.set_title("给定道路尺寸")
+        solved = set(result.solved_keys)
         for key in ROAD_KEYS[result.inputs.scenario]:
+            if key in result.pins.dims:
+                suffix = "（固定）"
+            elif key in GIVEN_ONLY_KEYS:
+                suffix = "（给定）"
+            else:
+                suffix = ""
             card.add_row(
                 dimension_label(
                     result.inputs.scenario, key, bidirectional=result.inputs.bidirectional
-                ),
+                )
+                + suffix,
                 f"{format_length(getattr(result.dims, key))} m",
                 kind="solved" if key in solved else "",
             )
@@ -932,22 +1191,6 @@ class ScenarioPanel(QWidget):
             return
         card.set_note("")
 
-    def _fill_detail(self, result: ScenarioResult) -> None:
-        card = self._detail_card
-        card.clear()
-        if result.inputs.mode is not SolveMode.CHECK or result.infeasible:
-            card.hide()
-            return
-        card.show()
-        _, state = STATUS_WORDS[result.status]
-        card.add_row("最小净距", f"{format_length(result.min_clearance)} m", state=state)
-        card.add_row("净距阈值", f"{format_length(result.inputs.threshold)} m")
-        card.add_row("相对阈值余量", f"{format_length(result.margin, signed=True)} m")
-        if result.centred_clearance is not None:
-            card.add_row(
-                "居中直行时最小净距", f"{format_length(result.centred_clearance)} m"
-            )
-
     def _fill_offsets(self, result: ScenarioResult) -> None:
         card = self._offset_card
         card.clear()
@@ -956,16 +1199,17 @@ class ScenarioPanel(QWidget):
             return
         card.show()
         bands = {band.key: band for band in result.bands}
-        free = set(_offset_keys(result))
-        for key in ("ea", "eb", "ev", "eh", "a", "so", "e1", "e2", "eo"):
-            if key not in free:
+        pareto = result.inputs.pareto
+        for row in offset_rows(result.inputs.scenario, bidirectional=result.inputs.bidirectional):
+            if row.key is None or row.shared or (row.key != "yc" and not pareto):
                 continue
+            pinned = row.key in result.pins.offsets
             card.add_row(
-                OFFSET_LABELS[key],
-                f"{format_length(getattr(result.offsets, key), signed=True)} m",
+                row.label + ("（固定）" if pinned else ""),
+                f"{format_length(getattr(result.offsets, row.key), signed=True)} m",
                 kind="offset",
             )
-            band = bands.get(key)
+            band = bands.get(row.key)
             if band is not None:
                 if band.low is None or band.high is None:
                     card.add_row("　可行区间", "无可行值", state="danger")
@@ -975,13 +1219,10 @@ class ScenarioPanel(QWidget):
                         f"{format_length(band.low, signed=True)}…"
                         f"{format_length(band.high, signed=True)} m",
                     )
-        if result.inputs.scenario is Scenario.UTURN:
-            card.add_row(
-                OFFSET_LABELS["yc"],
-                f"{format_length(result.offsets.yc, signed=True)} m",
-                kind="offset",
-            )
-        card.set_note("弯道内侧为正、外侧为负。")
+        note = "弯道内侧为正、外侧为负。"
+        if result.centred_clearance is not None:
+            note += f" 全部偏移归零时最小净距 {format_length(result.centred_clearance)} m。"
+        card.set_note(note)
 
     def _fill_radii(self, result: ScenarioResult) -> None:
         card = self._radius_card
@@ -998,13 +1239,3 @@ class ScenarioPanel(QWidget):
     @property
     def vehicle_inputs(self) -> ScenarioInputs:
         return self._inputs
-
-
-def _offset_keys(result: ScenarioResult) -> tuple[str, ...]:
-    """Which lateral offsets were free for this result; ``yc`` gets its own row."""
-
-    return tuple(
-        spec.key
-        for spec in offset_specs(result.inputs, result.dims)
-        if spec.key != "yc"
-    )
