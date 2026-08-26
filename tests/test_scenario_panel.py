@@ -1,4 +1,6 @@
 import pytest
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QGroupBox
 from pytestqt.qtbot import QtBot
 
@@ -7,7 +9,9 @@ from route_analysis.models import ClearanceStatus, VehicleDimensions
 from route_analysis.scenario_geometry import (
     SOLVED_KEYS,
     Gear,
+    RoadDimensions,
     Scenario,
+    ScenarioInputs,
     SolveMode,
 )
 from route_analysis.scenario_graphics import (
@@ -15,6 +19,8 @@ from route_analysis.scenario_graphics import (
     LEGEND_ITEMS,
     LEGEND_ROW,
     BodySection,
+    _transform,
+    paint_scenario_plan,
 )
 from route_analysis.scenario_panel import (
     RESULT_WIDTH,
@@ -22,6 +28,7 @@ from route_analysis.scenario_panel import (
     SIDEBAR_WIDTH,
     ScenarioPanel,
 )
+from route_analysis.scenario_solver import solve_scenario, trace_maneuvers
 
 SOLVE_TIMEOUT_MS = 30_000
 """Forward solves in the heaviest variants run past a second on a busy machine."""
@@ -293,3 +300,55 @@ def test_the_body_section_picker_sits_with_the_dimensions_it_splits_on(
         owner = owner.parent()
     assert isinstance(owner, QGroupBox)
     assert owner.title() == "车辆参数"
+
+
+def test_every_dot_on_the_plan_has_its_own_colour() -> None:
+    """The markers carry no caption, so colour is the only thing telling them apart.
+
+    Start, end and tightest-clearance are all plain dots. End used to share the danger red
+    with the clearance point, which was survivable only while each dot was labelled on the
+    plan; the captions covered the dots they named and came off.
+    """
+
+    dots = [(name, colour) for name, colour, shape in LEGEND_ITEMS if shape == "dot"]
+    assert len(dots) >= 3
+    colours = [colour for _name, colour in dots]
+    assert len(set(colours)) == len(colours), dots
+
+
+@pytest.mark.parametrize("extreme", [False, True])
+@pytest.mark.parametrize("scenario", list(Scenario))
+def test_the_endpoint_dots_are_never_painted_over(scenario, extreme, qtbot: QtBot) -> None:
+    """Render and read the actual pixel under each dot.
+
+    They carry no caption now, so a dot that something else covers is simply gone. The
+    dimension marks used to land on top: with an offset moving the stub start under the
+    出弯主路深度 label, its halo erased the dot entirely. Colours survive a machine with no
+    CJK font, unlike anything that measures text.
+    """
+
+    inputs = ScenarioInputs(
+        scenario=scenario, mode=SolveMode.FORWARD, extreme=extreme,
+        dimensions=VehicleDimensions(width=1.23, center_front=1.545, center_rear=2.223),
+        radius=1.20, threshold=0.15,
+    )
+    result = solve_scenario(inputs, RoadDimensions())
+    image = QImage(900, 600, QImage.Format.Format_RGB32)
+    image.fill(QColor("#ffffff"))
+    painter = QPainter(image)
+    paint_scenario_plan(painter, QRectF(0, 0, 900, 600), result)
+    painter.end()
+
+    traces = trace_maneuvers(result.layout, inputs.dimensions)
+    plan = QRectF(8, 8, 900 - 16, 600 - LEGEND_HEIGHT - 20)
+    transform = _transform(plan, result.layout.view_bounds)
+    for trace in traces:
+        for index, colour in ((0, theme.SUCCESS_BAR), (len(trace.x) - 1, theme.ENDPOINT_END)):
+            point = transform.point(float(trace.x[index]), float(trace.y[index]))
+            found = any(
+                QColor(image.pixel(int(point.x()) + dx, int(point.y()) + dy)).name().lower()
+                == colour.lower()
+                for dx in range(-2, 3)
+                for dy in range(-2, 3)
+            )
+            assert found, (scenario, extreme, trace.label, colour)
