@@ -464,9 +464,7 @@ def _dimension_marks(result: ScenarioResult) -> list[tuple[tuple, tuple, str, st
 
 
 def _draw_annotations(painter: QPainter, transform: _Transform, result: ScenarioResult) -> None:
-    from route_analysis.scenario_geometry import SOLVED_KEYS
-
-    solved_keys = SOLVED_KEYS[result.inputs.scenario] if result.solved else ()
+    solved_keys = result.solved_keys if result.solved else ()
     for start, end, message, key in _dimension_marks(result):
         _draw_dimension(
             painter, transform, start, end, message, solved=key in solved_keys

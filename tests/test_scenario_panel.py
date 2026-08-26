@@ -1,18 +1,23 @@
+import time
+
 import pytest
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QGroupBox
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QGroupBox, QScrollArea
 from pytestqt.qtbot import QtBot
 
-from route_analysis import theme
+from route_analysis import scenario_panel, theme
 from route_analysis.models import ClearanceStatus, VehicleDimensions
 from route_analysis.scenario_geometry import (
     SOLVED_KEYS,
+    Condition,
     Gear,
+    Pins,
     RoadDimensions,
     Scenario,
     ScenarioInputs,
-    SolveMode,
+    offset_rows,
 )
 from route_analysis.scenario_graphics import (
     LEGEND_HEIGHT,
@@ -23,7 +28,11 @@ from route_analysis.scenario_graphics import (
     paint_scenario_plan,
 )
 from route_analysis.scenario_panel import (
+    CENTRELINE_ROAD_NOTE,
+    MIDDLE_ROW,
+    OFFSET_ROW_KEYS,
     RESULT_WIDTH,
+    ROAD_KEYS,
     RUN_CAPTION,
     SIDEBAR_WIDTH,
     ScenarioPanel,
@@ -55,13 +64,24 @@ def _settled(qtbot: QtBot, panel: ScenarioPanel):
     return caught.args[0]
 
 
+def _pareto_panel(qtbot: QtBot, scenario: Scenario = Scenario.CORNER, **variant):
+    """A shown panel already settled under the Pareto condition."""
+
+    panel = _panel(qtbot)
+    _settled(qtbot, panel)
+    panel.select_variant(scenario=scenario, condition=Condition.PARETO, **variant)
+    result = _settled(qtbot, panel)
+    return panel, result
+
+
 def test_the_default_state_solves_a_road_without_any_data_source(qtbot: QtBot) -> None:
     panel = _panel(qtbot)
     result = _settled(qtbot, panel)
-    assert result.inputs.mode is SolveMode.FORWARD
+    assert result.inputs.condition is Condition.CENTRELINE
     assert result.inputs.scenario is Scenario.CORNER
     assert not result.infeasible
     assert result.status is ClearanceStatus.SAFE
+    assert result.solved_keys == SOLVED_KEYS[Scenario.CORNER]
 
 
 def test_config_defaults_seed_the_vehicle_without_writing_back(qtbot: QtBot) -> None:
@@ -86,19 +106,24 @@ def test_composite_scenarios_swap_the_gear_picker_for_a_fixed_pill(qtbot: QtBot)
     assert result.inputs.effective_gear is Gear.DRIVE
 
 
-def test_forward_mode_hides_the_road_inputs_it_is_going_to_solve(qtbot: QtBot) -> None:
+def test_the_centreline_hides_the_dimensions_it_solves_and_pareto_lists_them(
+    qtbot: QtBot,
+) -> None:
     panel = _panel(qtbot)
     _settled(qtbot, panel)
     assert not panel._road_rows["wa"].isVisible()
     assert panel._road_note.isVisible()
-    panel._mode_changed(SolveMode.CHECK)
+    assert panel._road_note.text() == CENTRELINE_ROAD_NOTE
+    panel._condition_changed(Condition.PARETO)
     _settled(qtbot, panel)
     assert panel._road_rows["wa"].isVisible()
-    assert not panel._road_note.isVisible()
+    assert panel._road_rows["wb"].isVisible()
+    assert panel._road_note.isVisible()
+    assert panel._road_note.text() != CENTRELINE_ROAD_NOTE
 
 
-def test_the_divider_stays_an_input_even_when_solving_forward(qtbot: QtBot) -> None:
-    """The divider is site fabric, so it stays an input even when solving forward."""
+def test_the_divider_stays_an_input_even_on_the_centreline(qtbot: QtBot) -> None:
+    """The divider is site fabric, so it stays an input even when everything else is solved."""
 
     panel = _panel(qtbot)
     panel._scenario_changed(Scenario.UTURN)
@@ -107,13 +132,169 @@ def test_the_divider_stays_an_input_even_when_solving_forward(qtbot: QtBot) -> N
     assert not panel._road_rows["w"].isVisible()
 
 
-def test_a_solved_road_lands_in_the_inputs_so_check_mode_can_continue(qtbot: QtBot) -> None:
+def test_the_centreline_shows_no_offset_rows_and_only_the_given_dimensions(
+    qtbot: QtBot,
+) -> None:
+    panel = _panel(qtbot)
+    panel._scenario_changed(Scenario.UTURN)
+    _settled(qtbot, panel)
+    shown = [key for key, row in panel._road_rows.items() if row.isVisible()]
+    assert shown == ["b"]
+    assert not any(holder.isVisible() for holder in panel._offset_holders.values())
+
+
+def test_solved_values_are_written_back_into_the_inputs(qtbot: QtBot) -> None:
     panel = _panel(qtbot)
     result = _settled(qtbot, panel)
     for key in SOLVED_KEYS[Scenario.CORNER]:
         assert panel._road_spins[key].value() == pytest.approx(
             getattr(result.dims, key), abs=5e-3
         )
+
+
+def test_pareto_lists_every_dimension_and_every_offset_of_the_layout(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.UTURN)
+    shown = [key for key, row in panel._road_rows.items() if row.isVisible()]
+    assert sorted(shown) == sorted(ROAD_KEYS[Scenario.UTURN])
+    assert not panel._road_pins["b"].isVisible()
+    assert panel._road_captions["b"].text().endswith("（给定）")
+    assert panel._road_pins["w"].isVisible()
+    assert panel._road_pins["d"].isVisible()
+    listed = [row.key for row in offset_rows(Scenario.UTURN, bidirectional=False)]
+    assert listed == ["e1", "e2", "yc"]
+    for key in OFFSET_ROW_KEYS:
+        assert panel._offset_holders[key].isVisible() == (key in listed), key
+
+
+def test_editing_a_dimension_pins_it_and_the_solver_works_around_it(qtbot: QtBot) -> None:
+    panel, before = _pareto_panel(qtbot)
+    assert before.solved_keys == ("wa", "wb")
+    panel._road_spins["wa"].setValue(3.5)
+    assert "wa" in panel._pins.dims
+    assert panel._road_pins["wa"].isChecked()
+    assert not panel._road_pins["wb"].isChecked()
+    result = _settled(qtbot, panel)
+    assert "wa" in result.pins.dims
+    assert result.dims.wa == pytest.approx(3.5)
+    assert result.solved_keys == ("wb",)
+    assert result.dims.wb < before.dims.wb
+
+
+def test_releasing_a_pin_hands_the_dimension_back_and_refills_the_spin(qtbot: QtBot) -> None:
+    panel, _before = _pareto_panel(qtbot)
+    panel._road_spins["wa"].setValue(3.5)
+    _settled(qtbot, panel)
+    panel._road_pins["wa"].setChecked(False)
+    assert "wa" not in panel._pins.dims
+    result = _settled(qtbot, panel)
+    assert "wa" in result.solved_keys
+    assert result.dims.wa < 3.5
+    assert panel._road_spins["wa"].value() == pytest.approx(result.dims.wa, abs=5e-3)
+
+
+def test_editing_an_offset_pins_it_at_the_typed_value(qtbot: QtBot) -> None:
+    panel, before = _pareto_panel(qtbot)
+    assert before.offsets.ea != pytest.approx(0.2, abs=1e-3)
+    panel._offset_spins["ea"].setValue(0.2)
+    assert panel._pins.offsets == frozenset({"ea"})
+    assert panel._offset_pins["ea"].isChecked()
+    result = _settled(qtbot, panel)
+    assert "ea" in result.pins.offsets
+    assert result.offsets.ea == pytest.approx(0.2)
+    assert not result.infeasible
+
+
+def test_unpinned_offsets_show_what_the_solver_chose(qtbot: QtBot) -> None:
+    panel, result = _pareto_panel(qtbot)
+    assert result.pins == Pins()
+    for row in offset_rows(Scenario.CORNER, bidirectional=False):
+        assert row.key is not None
+        assert panel._offset_spins[row.key].value() == pytest.approx(
+            getattr(result.offsets, row.key), abs=5e-3
+        ), row.key
+
+
+def test_a_shared_leg_in_a_two_way_layout_is_listed_but_held_at_zero(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, bidirectional=True)
+    shared = panel._offset_spins["eb"]
+    assert panel._offset_holders["eb"].isVisible()
+    assert not shared.isEnabled()
+    assert shared.value() == pytest.approx(0.0)
+    assert panel._offset_captions["eb"].text() == "支路偏移"
+    assert panel._offset_shared["eb"].isVisible()
+    assert not panel._offset_pins["eb"].isVisible()
+    assert panel._offset_spins["ea"].isEnabled()
+    assert panel._offset_pins["ea"].isVisible()
+
+
+def test_a_two_way_uturn_lists_the_middle_aisle_it_shares(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.UTURN, bidirectional=True)
+    assert panel._offset_holders[MIDDLE_ROW].isVisible()
+    assert panel._offset_captions[MIDDLE_ROW].text() == "中巷偏移"
+    assert panel._offset_shared[MIDDLE_ROW].isVisible()
+    assert not panel._offset_spins[MIDDLE_ROW].isEnabled()
+    assert not panel._offset_pins[MIDDLE_ROW].isVisible()
+    assert panel._offset_holders["eo"].isVisible()
+    assert panel._offset_holders["yc"].isVisible()
+    assert not panel._offset_holders["e1"].isVisible()
+    assert not panel._offset_holders["e2"].isVisible()
+
+
+@pytest.mark.parametrize(
+    "switch",
+    [
+        lambda panel: panel._scenario_changed(Scenario.CROSSBACK),
+        lambda panel: panel._direction_changed(True),
+    ],
+    ids=["scenario", "direction"],
+)
+def test_changing_the_layout_releases_every_pin(switch, qtbot: QtBot) -> None:
+    panel, _before = _pareto_panel(qtbot)
+    panel._road_spins["wa"].setValue(3.5)
+    panel._offset_spins["ea"].setValue(0.2)
+    _settled(qtbot, panel)
+    assert panel._pins != Pins()
+    switch(panel)
+    result = _settled(qtbot, panel)
+    assert panel._pins == Pins()
+    assert result.pins == Pins()
+    assert not any(pin.isChecked() for pin in panel._road_pins.values())
+    assert not any(pin.isChecked() for pin in panel._offset_pins.values())
+
+
+def test_changing_the_vehicle_keeps_the_pins(qtbot: QtBot) -> None:
+    panel, _before = _pareto_panel(qtbot)
+    panel._road_spins["wa"].setValue(3.5)
+    _settled(qtbot, panel)
+    panel._vehicle_spins["radius"].setValue(1.40)
+    result = _settled(qtbot, panel)
+    assert result.inputs.radius == pytest.approx(1.40)
+    assert result.pins.dims == frozenset({"wa"})
+    assert result.dims.wa == pytest.approx(3.5)
+    assert panel._road_pins["wa"].isChecked()
+
+
+def test_pinning_every_dimension_turns_the_solve_into_a_verdict(qtbot: QtBot) -> None:
+    panel, _before = _pareto_panel(qtbot)
+    panel._road_spins["wa"].setValue(3.0)
+    panel._road_spins["wb"].setValue(3.0)
+    result = _settled(qtbot, panel)
+    assert result.pins.dims == frozenset(SOLVED_KEYS[Scenario.CORNER])
+    assert result.solved_keys == ()
+    assert not result.solved
+    assert not result.infeasible
+    assert panel._status_card._title.text() == "判定"
+    assert panel._dimension_card._title.text() == "给定道路尺寸"
+
+
+def test_a_pinned_road_that_breaches_says_so_without_popping_a_dialog(qtbot: QtBot) -> None:
+    panel, _before = _pareto_panel(qtbot)
+    panel._road_spins["wa"].setValue(2.0)
+    panel._road_spins["wb"].setValue(2.0)
+    result = _settled(qtbot, panel)
+    assert result.solved_keys == ()
+    assert result.status is ClearanceStatus.OUTSIDE
+    assert result.min_clearance < 0
 
 
 def test_only_the_last_change_in_a_burst_reaches_the_view(qtbot: QtBot) -> None:
@@ -149,30 +330,27 @@ def test_layer_toggles_redraw_without_solving_again(qtbot: QtBot) -> None:
     assert not panel.plan._layers.envelope
 
 
-def test_check_mode_reports_a_breach_without_popping_a_dialog(qtbot: QtBot) -> None:
-    panel = _panel(qtbot)
-    _settled(qtbot, panel)
-    panel._mode_changed(SolveMode.CHECK)
-    _settled(qtbot, panel)
-    for key, value in (("wa", 3.0), ("wb", 3.0)):
-        panel._road_spins[key].setValue(value)
-    result = _settled(qtbot, panel)
-    assert result.status is ClearanceStatus.OUTSIDE
-    assert result.min_clearance < 0
-
-
 def test_a_uturn_that_cannot_hold_the_radius_says_so_on_the_card(qtbot: QtBot) -> None:
-    panel = _panel(qtbot)
-    _settled(qtbot, panel)
-    panel._mode_changed(SolveMode.CHECK)
-    panel._scenario_changed(Scenario.UTURN)
-    _settled(qtbot, panel)
+    """With every dimension pinned the layout is checked, and the shortfall is named.
+
+    Pinning only ``w`` leaves ``d`` to solve; that search fails first and reports a plain
+    "no feasible road" without the radius arithmetic, so the road is pinned outright.
+    """
+
+    panel, _before = _pareto_panel(qtbot, Scenario.UTURN)
     panel._vehicle_spins["radius"].setValue(1.60)
     panel._road_spins["w"].setValue(1.80)
+    panel._road_spins["d"].setValue(5.00)
     panel._road_spins["b"].setValue(0.60)
+    assert panel._pins.dims == frozenset({"w", "d"})
     result = _settled(qtbot, panel)
     assert result.infeasible
-    assert result.required_lane_width == pytest.approx(2.6)
+    assert result.solved_keys == ()
+    # Leaning the free aisle offsets outwards widens the circle, so less than 2R - b.
+    assert result.required_lane_width is not None
+    assert 1.80 < result.required_lane_width < 2.6
+    assert panel._status_card._title.text() == "求解状态"
+    assert f"{result.required_lane_width:.2f}" in panel._status_card._note.text()
 
 
 def test_the_envelope_can_show_one_end_of_the_body_at_a_time(qtbot: QtBot) -> None:
@@ -316,9 +494,9 @@ def test_every_dot_on_the_plan_has_its_own_colour() -> None:
     assert len(set(colours)) == len(colours), dots
 
 
-@pytest.mark.parametrize("extreme", [False, True])
+@pytest.mark.parametrize("condition", list(Condition))
 @pytest.mark.parametrize("scenario", list(Scenario))
-def test_the_endpoint_dots_are_never_painted_over(scenario, extreme, qtbot: QtBot) -> None:
+def test_the_endpoint_dots_are_never_painted_over(scenario, condition, qtbot: QtBot) -> None:
     """Render and read the actual pixel under each dot.
 
     They carry no caption now, so a dot that something else covers is simply gone. The
@@ -328,7 +506,7 @@ def test_the_endpoint_dots_are_never_painted_over(scenario, extreme, qtbot: QtBo
     """
 
     inputs = ScenarioInputs(
-        scenario=scenario, mode=SolveMode.FORWARD, extreme=extreme,
+        scenario=scenario, condition=condition,
         dimensions=VehicleDimensions(width=1.23, center_front=1.545, center_rear=2.223),
         radius=1.20, threshold=0.15,
     )
@@ -351,4 +529,177 @@ def test_the_endpoint_dots_are_never_painted_over(scenario, extreme, qtbot: QtBo
                 for dx in range(-2, 3)
                 for dy in range(-2, 3)
             )
-            assert found, (scenario, extreme, trace.label, colour)
+            assert found, (scenario, condition, trace.label, colour)
+
+
+def test_the_gear_and_the_condition_also_release_every_pin(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    panel._road_spins["wa"].setValue(3.5)
+    _settled(qtbot, panel)
+    assert "wa" in panel._pins.dims
+    panel._gear_changed(Gear.REVERSE)
+    _settled(qtbot, panel)
+    assert panel._pins == Pins()
+    assert not panel._road_pins["wa"].isChecked()
+    panel._road_spins["wa"].setValue(3.5)
+    _settled(qtbot, panel)
+    assert "wa" in panel._pins.dims
+    panel._condition_changed(Condition.CENTRELINE)
+    _settled(qtbot, panel)
+    assert panel._pins == Pins()
+
+
+def test_clicking_the_selected_choice_again_keeps_the_pins(qtbot: QtBot) -> None:
+    """Re-clicking what is already selected is not a switch, so nothing is released."""
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    panel._road_spins["wa"].setValue(3.5)
+    _settled(qtbot, panel)
+    generation = panel._generation
+    panel._condition_changed(Condition.PARETO)
+    panel._scenario_changed(Scenario.CORNER)
+    panel._direction_changed(False)
+    panel._gear_changed(Gear.DRIVE)
+    assert "wa" in panel._pins.dims
+    assert panel._generation == generation
+
+
+def test_releasing_an_offset_pin_hands_it_back_and_refills_the_spin(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    panel._offset_spins["ea"].setValue(0.2)
+    _settled(qtbot, panel)
+    assert "ea" in panel._pins.offsets
+    panel._offset_pins["ea"].setChecked(False)
+    result = _settled(qtbot, panel)
+    assert "ea" not in result.pins.offsets
+    assert panel._offset_spins["ea"].value() == pytest.approx(result.offsets.ea, abs=5e-3)
+    assert panel._offset_spins["ea"].value() != pytest.approx(0.2, abs=1e-3)
+
+
+def test_the_pin_toggle_freezes_the_value_on_screen(qtbot: QtBot) -> None:
+    """What the toggle pins is the number in the box, not whatever the model last held."""
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    spin = panel._road_spins["wa"]
+    spin.blockSignals(True)
+    spin.setValue(3.30)
+    spin.blockSignals(False)
+    assert panel._road.wa != pytest.approx(3.30)
+    panel._road_pins["wa"].setChecked(True)
+    result = _settled(qtbot, panel)
+    assert "wa" in result.pins.dims
+    assert result.dims.wa == pytest.approx(3.30)
+
+
+def test_typing_a_value_and_clicking_pin_at_once_pins_the_typed_value(qtbot: QtBot) -> None:
+    """Keyboard tracking is off, so the typed text is uncommitted when the pin is clicked.
+
+    The click must not take focus (that would commit the text, auto-pin the row and let
+    the same click's toggle release it again); the toggle commits the text itself.
+    """
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    spin = panel._road_spins["wa"]
+    spin.setFocus()
+    spin.selectAll()
+    QTest.keyClicks(spin, "3.5")
+    assert spin.value() != pytest.approx(3.5)
+    QTest.mouseClick(panel._road_pins["wa"], Qt.MouseButton.LeftButton)
+    result = _settled(qtbot, panel)
+    assert "wa" in result.pins.dims
+    assert result.dims.wa == pytest.approx(3.5)
+    assert panel._road_pins["wa"].isChecked()
+
+
+def test_a_focused_but_untouched_spin_still_takes_the_refill(qtbot: QtBot) -> None:
+    """Focus alone is not typing: the cursor resting in a box must not freeze a stale value."""
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    panel._road_spins["wa"].setValue(3.5)
+    panel._road_spins["wb"].setFocus()
+    result = _settled(qtbot, panel)
+    assert panel._road_spins["wb"].value() == pytest.approx(result.dims.wb, abs=5e-3)
+
+
+def test_a_result_in_flight_cannot_overwrite_a_value_pinned_meanwhile(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every input change moves the generation, so a stale solve is dropped, not applied.
+
+    The solve is slowed down so the edit is certain to land while it is still running;
+    without the generation bump the stale result would arrive first, refill ``wa`` with
+    the solver's value and reach the ``solved`` signal with no pin at all.
+    """
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    real = scenario_panel.solve_scenario
+
+    def slow(*args, **kwargs):
+        time.sleep(0.6)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scenario_panel, "solve_scenario", slow)
+    panel._vehicle_spins["radius"].setValue(1.40)
+    panel._timer.stop()
+    panel._start_solve()
+    panel._road_spins["wa"].setValue(3.5)
+    result = _settled(qtbot, panel)
+    assert "wa" in result.pins.dims
+    assert result.dims.wa == pytest.approx(3.5)
+    assert panel._road_spins["wa"].value() == pytest.approx(3.5)
+
+
+def test_the_wheel_only_turns_a_focused_spin(qtbot: QtBot) -> None:
+    """Scrolling the sidebar must not edit -- and so pin -- whatever box the pointer crosses."""
+
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    spin = panel._road_spins["wa"]
+    panel._road_spins["wb"].setFocus()
+    before = spin.value()
+    event = QWheelEvent(
+        QPointF(5, 5), spin.mapToGlobal(QPoint(5, 5)), QPoint(0, 120), QPoint(0, 120),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase, False,
+    )
+    QApplication.sendEvent(spin, event)
+    assert spin.value() == pytest.approx(before)
+    assert "wa" not in panel._pins.dims
+    spin.setFocus()
+    QApplication.sendEvent(spin, event)
+    assert spin.value() != pytest.approx(before)
+    assert "wa" in panel._pins.dims
+
+
+def test_releasing_a_pin_drops_text_that_was_never_committed(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.CORNER)
+    spin = panel._road_spins["wa"]
+    spin.setValue(3.5)
+    _settled(qtbot, panel)
+    spin.setFocus()
+    spin.selectAll()
+    QTest.keyClicks(spin, "4.2")
+    panel._road_pins["wa"].setChecked(False)
+    assert not spin.lineEdit().isModified()
+    assert "4.2" not in spin.text()
+    result = _settled(qtbot, panel)
+    assert "wa" not in result.pins.dims
+
+
+def test_shared_rows_carry_a_tag_instead_of_a_pin_and_keep_short_captions(
+    qtbot: QtBot,
+) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.CROSSBACK, bidirectional=True)
+    assert panel._offset_captions["ev"].text() == "倒车道偏移"
+    assert panel._offset_shared["ev"].isVisible()
+    assert not panel._offset_pins["ev"].isVisible()
+    assert panel._offset_pins["eh"].isVisible()
+    assert not panel._offset_shared["eh"].isVisible()
+    for caption in panel._offset_captions.values():
+        assert len(caption.text()) <= 8
+
+
+def test_the_sidebar_content_fits_its_viewport_under_pareto(qtbot: QtBot) -> None:
+    panel, _result = _pareto_panel(qtbot, Scenario.UTURN, bidirectional=True)
+    side = panel.findChild(QScrollArea)
+    assert side is not None
+    assert side.widget().minimumSizeHint().width() <= side.viewport().width()
