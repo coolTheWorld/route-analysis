@@ -748,6 +748,8 @@ class ScenarioResult:
     bands: tuple[OffsetBand, ...] = ()
     infeasible: bool = False
     threshold_ceiling: float | None = None
+    trunk_reach: float | None = None
+    """出弯主路深度 for the stub scenario: measured off the sweep, not solved for."""
 
     @property
     def solved(self) -> bool:
@@ -779,6 +781,32 @@ def _centred_clearance(inputs: ScenarioInputs, dims: RoadDimensions) -> float:
         candidate = offsets.with_value("yc", value)
         best = max(best, evaluate(inputs, dims, candidate, FINE, detail=True).clearance)
     return best
+
+
+def trunk_reach(
+    layout: ScenarioLayout, vehicle: VehicleDimensions, branch_width: float, threshold: float
+) -> float:
+    """How far along the trunk the reverse swing runs, measured from the branch mouth.
+
+    Reported rather than searched for. It cannot be a wall the solver squeezes: the trunk
+    carries on in both directions, and in a two-way layout the mirrored maneuver drives away
+    through the very side the other one swings into, so a wall placed there would block the
+    departure it is supposed to size. Measured over the reverse poses only -- the forward leg
+    is the truck leaving, not the swing -- and the widest of those is the moment the wheels
+    come straight, which is exactly the reading being asked for.
+    """
+
+    widest = 0.0
+    for maneuver in layout.maneuvers:
+        samples = sample_poses(maneuver.primitives, vehicle, FINE)
+        if not len(samples):
+            continue
+        reversing = ~samples.gear_is_drive
+        if not reversing.any():
+            continue
+        along = samples.corners[reversing][:, :, 0]
+        widest = max(widest, float(np.abs(along).max()))
+    return max(0.0, widest - branch_width / 2 + threshold)
 
 
 def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioResult:
@@ -830,6 +858,11 @@ def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioRes
     probe = evaluate_layout(layout, inputs.dimensions, FINE, detail=True)
     bands: tuple[OffsetBand, ...] = ()
     centred: float | None = None
+    reach = (
+        trunk_reach(layout, inputs.dimensions, dims.wv, inputs.threshold)
+        if inputs.scenario is Scenario.STUBBACK
+        else None
+    )
     if inputs.mode is SolveMode.CHECK and inputs.extreme:
         centred = _centred_clearance(inputs, dims)
         bands = feasible_bands(inputs, dims, offsets)
@@ -847,6 +880,7 @@ def solve_scenario(inputs: ScenarioInputs, given: RoadDimensions) -> ScenarioRes
         centred_clearance=centred,
         bands=bands,
         threshold_ceiling=ceiling,
+        trunk_reach=reach,
     )
 
 

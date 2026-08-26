@@ -512,3 +512,49 @@ def test_stubback_starts_inside_the_branch_and_leaves_along_the_trunk():
 
     turned = max(samples.x[: len(samples) // 2])
     assert turned > 0, "倒车转弯经过主路东侧"
+
+
+def test_the_stub_branch_runs_on_and_its_depth_is_not_a_dimension():
+    """A stub road carries on past the parked truck, so how much deeper is nobody's limit.
+
+    It used to be solved for, back when the maneuver turned around inside the branch. The
+    truck now only starts there, and its nose reaching further in costs nothing.
+    """
+
+    assert "ls" not in SOLVED_KEYS[Scenario.STUBBACK]
+    result = solve_scenario(
+        _inputs(scenario=Scenario.STUBBACK, mode=SolveMode.FORWARD), RoadDimensions()
+    )
+    floor = min(point[1] for point in result.layout.region)
+    nose = result.layout.maneuvers[0].primitives[0]
+    start_y = nose.centre[1] + nose.radius * math.sin(nose.start_angle)
+    assert floor < start_y - DIMENSIONS.center_front - 2.0, "支路尽头必须远到够不着"
+
+
+def test_the_trunk_reach_matches_the_closed_form_and_survives_the_mirror():
+    """出弯主路深度 = R + 中心后距 - 支路宽/2 + 阈值, measured from the far wall of the mouth.
+
+    The widest reverse pose is the one where the wheels come straight: the body is then
+    along the trunk with its tail a full 中心后距 past the turn centre. Two-way mirrors that
+    maneuver, so the reading must not change -- and it cannot be walled in and searched for,
+    because the mirrored maneuver drives away through the side the other one swings into.
+    """
+
+    for bidirectional in (False, True):
+        inputs = _inputs(
+            scenario=Scenario.STUBBACK, bidirectional=bidirectional, mode=SolveMode.FORWARD
+        )
+        result = solve_scenario(inputs, RoadDimensions())
+        assert result.trunk_reach is not None
+        expected = (
+            inputs.radius
+            + DIMENSIONS.center_rear
+            - result.dims.wv / 2
+            + inputs.threshold
+        )
+        assert result.trunk_reach == pytest.approx(expected, abs=2e-3), bidirectional
+
+    other = solve_scenario(
+        _inputs(scenario=Scenario.CORNER, mode=SolveMode.FORWARD), RoadDimensions()
+    )
+    assert other.trunk_reach is None, "只有借支路那个场景有这项"
