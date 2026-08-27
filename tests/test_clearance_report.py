@@ -1,4 +1,5 @@
 import math
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,17 @@ from route_analysis.models import (
 )
 
 DIMENSIONS = VehicleDimensions(width=1.20, center_front=1.00, center_rear=1.60)
+
+
+def _page_text(document, page: int) -> str:
+    """Extracted text, NFKC-normalised.
+
+    Noto CJK maps a handful of glyphs (行, 日, 车…) to Kangxi-radical codepoints on
+    extraction; NFKC folds those back to the unified ideographs, so the assertions hold
+    whatever font the machine renders with.
+    """
+
+    return unicodedata.normalize("NFKC", document.getAllText(page).text())
 
 
 def _arc(centre_x: float, centre_y: float, radius: float, start: float, end: float,
@@ -115,8 +127,8 @@ def test_report_carries_its_premises_and_the_disclaimer(qtbot: QtBot, tmp_path: 
     export_report_pdf(target, analysis, _context(), build_suggestions(analysis))
     document = QPdfDocument()
     document.load(str(target))
-    first = document.getAllText(0).text()
-    last = document.getAllText(1).text()
+    first = _page_text(document, 0)
+    last = _page_text(document, 1)
     assert "SO-1" in first
     assert "CMD-1-20260820-1042" in first
     assert "只建议" in first
@@ -153,4 +165,4 @@ def test_report_includes_the_selected_width_ruler(qtbot: QtBot, tmp_path: Path) 
     export_report_pdf(target, analysis, _context(), build_suggestions(analysis), zones=zones)
     document = QPdfDocument()
     document.load(str(target))
-    assert "不可行" in document.getAllText(1).text()
+    assert "不可行" in _page_text(document, 1)

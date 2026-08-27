@@ -80,6 +80,7 @@ from route_analysis.models import (
 )
 from route_analysis.path_details_panel import PathDetailsPanel
 from route_analysis.scenario_panel import ScenarioPanel
+from route_analysis.scenario_report import export_scenario_pdf
 from route_analysis.settings_dialog import SettingsDialog
 from route_analysis.storage import (
     ConfigRepository,
@@ -272,6 +273,7 @@ class MainWindow(QMainWindow):
         self.clearance_panel.export_pdf_requested.connect(self.export_clearance_report)
         self.canvas_tabs.addTab(self.clearance_panel, "通行余量")
         self.scenario_panel = ScenarioPanel()
+        self.scenario_panel.export_pdf_requested.connect(self.export_scenario_report)
         default_vehicle = self.config.default_vehicle
         if default_vehicle is not None:
             self.scenario_panel.set_vehicle_defaults(
@@ -1610,6 +1612,32 @@ class MainWindow(QMainWindow):
             source=source,
             mismatches=preview.mismatches,
         )
+
+    def export_scenario_report(self) -> None:
+        result = self.scenario_panel.result
+        if result is None:
+            return
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出场景速算报告",
+            f"scenario-{result.inputs.scenario.value}-{stamp}.pdf",
+            "PDF (*.pdf)",
+        )
+        if not filename:
+            return
+        try:
+            export_scenario_pdf(
+                Path(filename),
+                result,
+                report_id=stamp,
+                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                layers=self.scenario_panel.plan_layers,
+            )
+        except (OSError, ValueError) as exc:
+            self._show_error(f"导出场景速算报告失败：{exc}")
+            return
+        self.status_label.setText(f"场景速算报告已导出到 {filename}")
 
     def export_lanes(self) -> None:
         if self._lane_key is None:
