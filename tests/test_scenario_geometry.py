@@ -164,8 +164,8 @@ def test_stubback_branch_offset_is_positive_towards_the_arc_centre():
     shifted = build_layout(
         _inputs(scenario=Scenario.STUBBACK), RoadDimensions(), Offsets(so=0.3)
     )
-    plain_arc, plain_line = plain.maneuvers[0].primitives
-    shifted_arc, shifted_line = shifted.maneuvers[0].primitives
+    _park, plain_arc, plain_line = plain.maneuvers[0].primitives
+    _shifted_park, shifted_arc, shifted_line = shifted.maneuvers[0].primitives
     assert isinstance(plain_arc, Arc) and isinstance(shifted_arc, Arc)
     assert isinstance(plain_line, Line) and isinstance(shifted_line, Line)
     assert plain_arc.centre[0] > 0.0, "圆心在支路东侧"

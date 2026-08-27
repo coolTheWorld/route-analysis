@@ -15,6 +15,7 @@ from route_analysis.scenario_geometry import (
     SOLVED_KEYS,
     Condition,
     Gear,
+    Line,
     Offsets,
     Pins,
     RoadDimensions,
@@ -855,16 +856,17 @@ def test_feasible_bands_cover_a_pinned_offset_too():
 def test_stubback_starts_inside_the_branch_and_leaves_along_the_trunk():
     """The maneuver the requirement owner settled on, pinned end to end.
 
-    Nose south inside the branch, one quarter turn in reverse onto the east side of the
-    trunk, then forward away west. The shape it replaced never left the trunk at all: both
-    of its arcs met on the trunk centreline, so the front axle bottomed out one radius down
-    and only the tail ever swung into the branch.
+    Nose south inside the branch, a straight reverse run up the branch, one quarter turn
+    in reverse onto the east side of the trunk, then forward away west. The shape it
+    replaced never left the trunk at all: both of its arcs met on the trunk centreline, so
+    the front axle bottomed out one radius down and only the tail ever swung into the
+    branch. The straight run exists to pull the start marker clear of the branch mouth.
     """
 
     inputs = _inputs(scenario=Scenario.STUBBACK)
     result = solve_scenario(inputs, RoadDimensions())
     primitives = result.layout.maneuvers[0].primitives
-    assert [item.gear for item in primitives] == [Gear.REVERSE, Gear.DRIVE]
+    assert [item.gear for item in primitives] == [Gear.REVERSE, Gear.REVERSE, Gear.DRIVE]
 
     samples = sample_poses(primitives, DIMENSIONS, FINE)
     reach = np.where(samples.gear_is_drive, DIMENSIONS.center_front, -DIMENSIONS.center_front)
@@ -895,8 +897,9 @@ def test_the_stub_branch_runs_on_and_its_depth_is_not_a_dimension():
     assert "ls" not in SOLVED_KEYS[Scenario.STUBBACK]
     result = solve_scenario(_inputs(scenario=Scenario.STUBBACK), RoadDimensions())
     floor = min(point[1] for point in result.layout.region)
-    nose = result.layout.maneuvers[0].primitives[0]
-    start_y = nose.centre[1] + nose.radius * math.sin(nose.start_angle)
+    park = result.layout.maneuvers[0].primitives[0]
+    assert isinstance(park, Line)
+    start_y = park.start[1]
     assert floor < start_y - DIMENSIONS.center_front - 2.0, "支路尽头必须远到够不着"
 
 

@@ -434,8 +434,11 @@ def _dimension_marks(result: ScenarioResult) -> list[tuple[tuple, tuple, str, st
             (lx - 0.5, -dims.wh / 2), (lx - 0.5, dims.wh / 2),
             f"{label('wh')} {dims.wh:.2f}", "wh",
         ))
+        # Down at the branch's drawn end: at the mouth it crowded the start marker,
+        # the minimum-clearance dot and the trunk-reach mark.
+        branch_bottom = layout.view_bounds[1] + 0.45
         marks.append((
-            (-dims.wv / 2, -dims.wh / 2 - 0.5), (dims.wv / 2, -dims.wh / 2 - 0.5),
+            (-dims.wv / 2, branch_bottom), (dims.wv / 2, branch_bottom),
             f"{label('wv')} {dims.wv:.2f}", "wv",
         ))
         if result.trunk_reach is not None:
