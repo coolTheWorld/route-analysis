@@ -496,17 +496,25 @@ def _stubback(
     length = vehicle.center_front + vehicle.center_rear
     lx = abs(sx) + radius + length + 1.2
     lxx = lx + CAP_PAD
+    # The truck parks deeper in the branch and reverses straight before the swing. The
+    # straight run changes nothing the analysis reads -- every pose on it repeats the
+    # swing-start pose's lateral geometry -- but it pulls the start marker away from the
+    # branch mouth, where it crowded the dimension marks.
+    setback = 0.6 * length
+    start_y = ry - radius - setback
     # The branch carries on past the parked truck, so its far end is pushed out of reach
-    # like the open ends of the trunk. How much deeper it runs constrains nothing.
-    floor = -wh / 2 - CAP_PAD
+    # like the open ends of the trunk. How much deeper it runs constrains nothing; the
+    # closing edge follows the parked nose so it can never bind.
+    floor = min(-wh / 2, start_y - vehicle.center_front - 0.15) - CAP_PAD
     region = (
         (-lxx, -wh / 2), (-wv / 2, -wh / 2), (-wv / 2, floor),
         (wv / 2, floor), (wv / 2, -wh / 2), (lxx, -wh / 2),
         (lxx, wh / 2), (-lxx, wh / 2),
     )
     reach = length + 0.8
-    view_floor = min(-wh / 2, ry - radius - vehicle.center_front) - 0.8
+    view_floor = min(-wh / 2, start_y - vehicle.center_front) - 0.8
     primitives = (
+        Line((sx, start_y), (sx, ry - radius), Gear.REVERSE),
         Arc((sx + radius, ry - radius), radius, math.pi, math.pi / 2, Gear.REVERSE),
         Line((sx + radius, ry), (sx - radius - reach, ry), Gear.DRIVE),
     )

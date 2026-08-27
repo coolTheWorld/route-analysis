@@ -645,10 +645,15 @@ class Component extends DCLogic {
         const wH = dims.wH, wV = dims.wV, a = off.a || 0, so = bidir ? 0 : (off.so || 0);
         const ry = -a, sxx = -so;
         const LX = Math.abs(sxx) + R + Lf + Lr + 1.2;
-        const floor = -wH / 2 - CAP;
+        // 起点停在支路更深处，先倒车直行一段再摆出：直行段每个位姿的横向几何与摆出起点
+        // 相同，对净距与出弯主路深度都没有影响，只为把起点标记从支路口挪开。
+        const setback = 0.6 * (Lf + Lr);
+        const startY = ry - R - setback;
+        const floor = Math.min(-wH / 2, startY - Lf - 0.15) - CAP;
         const poly = [[-LX, -wH / 2], [-wV / 2, -wH / 2], [-wV / 2, floor], [wV / 2, floor], [wV / 2, -wH / 2], [LX, -wH / 2], [LX, wH / 2], [-LX, wH / 2]];
         const reach = Lf + Lr + 0.8;
         const prims = [
+          { t: 'L', a: [sxx, startY], b: [sxx, ry - R], g: 'R' },
           { t: 'A', c: [sxx + R, ry - R], r: R, a0: PI, a1: PI / 2, g: 'R' },
           { t: 'L', a: [sxx + R, ry], b: [sxx - R - reach, ry], g: 'D' },
         ];
