@@ -80,7 +80,7 @@
 
 验收标准：
 
-- `scripts/run.ps1` 可启动源码版，`scripts/build.ps1` 生成 Windows x64 文件夹发布物。
+- `scripts/run.cmd`（转发 `run.ps1`）可启动源码版，`scripts/build.cmd` 生成 Windows x64 文件夹发布物。
 - PyInstaller 发布物包含依赖并在 EXE 同级创建/读取 `data/`。
 - README、用户手册、架构/API 文档、故障排查、威胁模型和变更记录完整。
 - 全量测试、静态检查、类型检查、源码启动和打包应用冒烟均通过。
@@ -92,7 +92,7 @@
 .\.venv\Scripts\python.exe -m pytest
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m mypy route_analysis
-.\scripts\build.ps1
+.\scripts\build.cmd
 ```
 
 ## 里程碑 6：真实圆弧与自动车道生成
