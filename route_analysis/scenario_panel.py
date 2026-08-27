@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QToolButton,
@@ -413,6 +414,7 @@ class ScenarioPanel(QWidget):
     """The rapid-estimate tab."""
 
     solved = Signal(object)
+    export_pdf_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -749,6 +751,10 @@ class ScenarioPanel(QWidget):
         self._notice.setWordWrap(True)
         self._notice.hide()
         column.addWidget(self._notice)
+        self._export_button = QPushButton("导出 PDF 报告")
+        self._export_button.setEnabled(False)
+        self._export_button.clicked.connect(self.export_pdf_requested)
+        column.addWidget(self._export_button)
         column.addStretch(1)
         pill = QLabel("离线速算 · 不写回数据")
         pill.setObjectName("clearancePill")
@@ -895,11 +901,15 @@ class ScenarioPanel(QWidget):
         self._schedule()
 
     def _layers_changed(self, _checked: bool) -> None:
-        self.plan.set_layers(
-            PlanLayers(
-                **{key: button.isChecked() for key, button in self._layer_buttons.items()},
-                section=self._section,
-            )
+        self.plan.set_layers(self.plan_layers)
+
+    @property
+    def plan_layers(self) -> PlanLayers:
+        """The toggles as drawn right now; the PDF export reads them so the page matches."""
+
+        return PlanLayers(
+            **{key: button.isChecked() for key, button in self._layer_buttons.items()},
+            section=self._section,
         )
 
     def _section_changed(self, section: BodySection) -> None:
@@ -1066,6 +1076,7 @@ class ScenarioPanel(QWidget):
             return
         self._busy.hide()
         self._result = result
+        self._export_button.setEnabled(True)
         self.plan.set_result(result)
         self._fill_status(result)
         self._fill_dimensions(result)
@@ -1115,122 +1126,16 @@ class ScenarioPanel(QWidget):
     # ---------- 结果卡 ----------
 
     def _fill_status(self, result: ScenarioResult) -> None:
-        card = self._status_card
-        card.clear()
-        if result.infeasible:
-            card.set_title("求解状态")
-            card.add_row("结果", "不可行", state="danger")
-            card.set_state("danger")
-            if result.radius_shortfall > 0 and result.required_lane_width is not None:
-                card.set_note(
-                    f"巷道宽 + 隔墙宽 装不下最小转弯半径，还差 "
-                    f"{format_length(result.radius_shortfall)} m；巷道至少需 "
-                    f"{format_length(result.required_lane_width)} m。"
-                )
-            elif result.pins.dims or result.pins.offsets:
-                card.set_note(
-                    "在当前固定的尺寸与偏移下找不到可行解；放宽或取消部分固定再试。"
-                )
-            elif result.threshold_ceiling is not None:
-                card.set_note(
-                    f"在搜索上界处最多只能达到 "
-                    f"{format_length(result.threshold_ceiling)} m 净距，"
-                    f"阈值降到这个值以下才有解。"
-                )
-            return
-        word, state = STATUS_WORDS[result.status]
-        fits = result.solved and result.status is ClearanceStatus.SAFE
-        card.set_title("求解状态" if result.solved else "判定")
-        card.add_row("结果", "已求解" if fits else word, state=state)
-        card.add_row("最小净距", f"{format_length(result.min_clearance)} m", state=state)
-        card.add_row("相对阈值余量", f"{format_length(result.margin, signed=True)} m")
-        card.set_state(state)
-        pinned = result.pins.dims or result.pins.offsets
-        if result.solved and not fits:
-            card.set_note("求解停在阈值以下：放宽或取消部分固定，或降低净距阈值。")
-        elif result.solved:
-            card.set_note(NON_UNIQUE_NOTE + (" 已固定的项按给定值。" if pinned else ""))
-        elif result.inputs.pareto:
-            card.set_note("全部尺寸已固定，这是对给定道路的判定。")
-        else:
-            card.set_note("")
+        fill_status(self._status_card, result)
 
     def _fill_dimensions(self, result: ScenarioResult) -> None:
-        card = self._dimension_card
-        card.clear()
-        if result.solved:
-            card.set_title("一组最小可行尺寸（非唯一）")
-        elif result.infeasible:
-            card.set_title("道路尺寸（未求解）")
-        else:
-            card.set_title("给定道路尺寸")
-        solved = set(result.solved_keys)
-        for key in ROAD_KEYS[result.inputs.scenario]:
-            if key in result.pins.dims:
-                suffix = "（固定）"
-            elif key in GIVEN_ONLY_KEYS:
-                suffix = "（给定）"
-            else:
-                suffix = ""
-            card.add_row(
-                dimension_label(
-                    result.inputs.scenario, key, bidirectional=result.inputs.bidirectional
-                )
-                + suffix,
-                f"{format_length(getattr(result.dims, key))} m",
-                kind="solved" if key in solved else "",
-            )
-        if result.turn_radius is not None:
-            card.add_row("实际掉头半径 rs", f"{format_length(result.turn_radius)} m")
-        if result.trunk_reach is not None:
-            card.add_row("出弯主路深度", f"{format_length(result.trunk_reach)} m")
-            card.set_note(
-                "出弯主路深度自支路开口的外侧壁量起，是倒车摆出占用的那一段主路，"
-                "由扫掠结果量得而非求解得出 —— 主路本身继续延伸，两端都不是墙。"
-            )
-            return
-        card.set_note("")
+        fill_dimensions(self._dimension_card, result)
 
     def _fill_offsets(self, result: ScenarioResult) -> None:
-        card = self._offset_card
-        card.clear()
-        if result.infeasible or not result.inputs.optimises_offsets:
-            card.hide()
-            return
-        card.show()
-        bands = {band.key: band for band in result.bands}
-        pareto = result.inputs.pareto
-        for row in offset_rows(result.inputs.scenario, bidirectional=result.inputs.bidirectional):
-            if row.key is None or row.shared or (row.key != "yc" and not pareto):
-                continue
-            pinned = row.key in result.pins.offsets
-            card.add_row(
-                row.label + ("（固定）" if pinned else ""),
-                f"{format_length(getattr(result.offsets, row.key), signed=True)} m",
-                kind="offset",
-            )
-            band = bands.get(row.key)
-            if band is not None:
-                if band.low is None or band.high is None:
-                    card.add_row("　可行区间", "无可行值", state="danger")
-                else:
-                    card.add_row(
-                        "　可行区间",
-                        f"{format_length(band.low, signed=True)}…"
-                        f"{format_length(band.high, signed=True)} m",
-                    )
-        note = "弯道内侧为正、外侧为负。"
-        if result.centred_clearance is not None:
-            note += f" 全部偏移归零时最小净距 {format_length(result.centred_clearance)} m。"
-        card.set_note(note)
+        fill_offsets(self._offset_card, result)
 
     def _fill_radii(self, result: ScenarioResult) -> None:
-        card = self._radius_card
-        card.clear()
-        for kind in CornerRadiusKind:
-            card.add_row(
-                CORNER_LABELS[kind], f"{result.corner_radii[kind]:.3f} m"
-            )
+        fill_radii(self._radius_card, result)
 
     @property
     def result(self) -> ScenarioResult | None:
@@ -1239,3 +1144,151 @@ class ScenarioPanel(QWidget):
     @property
     def vehicle_inputs(self) -> ScenarioInputs:
         return self._inputs
+
+
+# ---------- 结果卡填充, 界面与 PDF 报告共用 ----------
+
+def fill_status(card: _Card, result: ScenarioResult) -> None:
+    card.clear()
+    if result.infeasible:
+        card.set_title("求解状态")
+        card.add_row("结果", "不可行", state="danger")
+        card.set_state("danger")
+        if result.radius_shortfall > 0 and result.required_lane_width is not None:
+            card.set_note(
+                f"巷道宽 + 隔墙宽 装不下最小转弯半径，还差 "
+                f"{format_length(result.radius_shortfall)} m；巷道至少需 "
+                f"{format_length(result.required_lane_width)} m。"
+            )
+        elif result.pins.dims or result.pins.offsets:
+            card.set_note(
+                "在当前固定的尺寸与偏移下找不到可行解；放宽或取消部分固定再试。"
+            )
+        elif result.threshold_ceiling is not None:
+            card.set_note(
+                f"在搜索上界处最多只能达到 "
+                f"{format_length(result.threshold_ceiling)} m 净距，"
+                f"阈值降到这个值以下才有解。"
+            )
+        return
+    word, state = STATUS_WORDS[result.status]
+    fits = result.solved and result.status is ClearanceStatus.SAFE
+    card.set_title("求解状态" if result.solved else "判定")
+    card.add_row("结果", "已求解" if fits else word, state=state)
+    card.add_row("最小净距", f"{format_length(result.min_clearance)} m", state=state)
+    card.add_row("相对阈值余量", f"{format_length(result.margin, signed=True)} m")
+    card.set_state(state)
+    pinned = result.pins.dims or result.pins.offsets
+    if result.solved and not fits:
+        card.set_note("求解停在阈值以下：放宽或取消部分固定，或降低净距阈值。")
+    elif result.solved:
+        card.set_note(NON_UNIQUE_NOTE + (" 已固定的项按给定值。" if pinned else ""))
+    elif result.inputs.pareto:
+        card.set_note("全部尺寸已固定，这是对给定道路的判定。")
+    else:
+        card.set_note("")
+
+
+def fill_dimensions(card: _Card, result: ScenarioResult) -> None:
+    card.clear()
+    if result.solved:
+        card.set_title("一组最小可行尺寸（非唯一）")
+    elif result.infeasible:
+        card.set_title("道路尺寸（未求解）")
+    else:
+        card.set_title("给定道路尺寸")
+    solved = set(result.solved_keys)
+    for key in ROAD_KEYS[result.inputs.scenario]:
+        if key in result.pins.dims:
+            suffix = "（固定）"
+        elif key in GIVEN_ONLY_KEYS:
+            suffix = "（给定）"
+        else:
+            suffix = ""
+        card.add_row(
+            dimension_label(
+                result.inputs.scenario, key, bidirectional=result.inputs.bidirectional
+            )
+            + suffix,
+            f"{format_length(getattr(result.dims, key))} m",
+            kind="solved" if key in solved else "",
+        )
+    if result.turn_radius is not None:
+        card.add_row("实际掉头半径 rs", f"{format_length(result.turn_radius)} m")
+    if result.trunk_reach is not None:
+        card.add_row("出弯主路深度", f"{format_length(result.trunk_reach)} m")
+        card.set_note(
+            "出弯主路深度自支路开口的外侧壁量起，是倒车摆出占用的那一段主路，"
+            "由扫掠结果量得而非求解得出 —— 主路本身继续延伸，两端都不是墙。"
+        )
+        return
+    card.set_note("")
+
+
+def fill_offsets(card: _Card, result: ScenarioResult) -> None:
+    card.clear()
+    if result.infeasible or not result.inputs.optimises_offsets:
+        card.hide()
+        return
+    card.show()
+    bands = {band.key: band for band in result.bands}
+    pareto = result.inputs.pareto
+    for row in offset_rows(result.inputs.scenario, bidirectional=result.inputs.bidirectional):
+        if row.key is None or row.shared or (row.key != "yc" and not pareto):
+            continue
+        pinned = row.key in result.pins.offsets
+        card.add_row(
+            row.label + ("（固定）" if pinned else ""),
+            f"{format_length(getattr(result.offsets, row.key), signed=True)} m",
+            kind="offset",
+        )
+        band = bands.get(row.key)
+        if band is not None:
+            if band.low is None or band.high is None:
+                card.add_row("　可行区间", "无可行值", state="danger")
+            else:
+                card.add_row(
+                    "　可行区间",
+                    f"{format_length(band.low, signed=True)}…"
+                    f"{format_length(band.high, signed=True)} m",
+                )
+    note = "弯道内侧为正、外侧为负。"
+    if result.centred_clearance is not None:
+        note += f" 全部偏移归零时最小净距 {format_length(result.centred_clearance)} m。"
+    card.set_note(note)
+
+
+def fill_radii(card: _Card, result: ScenarioResult) -> None:
+    card.clear()
+    for kind in CornerRadiusKind:
+        card.add_row(
+            CORNER_LABELS[kind], f"{result.corner_radii[kind]:.3f} m"
+        )
+
+
+def build_result_cards(result: ScenarioResult) -> list[QWidget]:
+    """The same result cards the view fills, freshly built for the report page.
+
+    Cards a state hides on screen (the offsets card when nothing optimises) are left
+    out here too, so the page shows exactly what the tab would.
+    """
+
+    status = _Card("求解状态", bar=True)
+    fill_status(status, result)
+    dimensions = _Card("道路极限尺寸")
+    fill_dimensions(dimensions, result)
+    radii = _Card("四角转弯半径（几何精确值）")
+    fill_radii(radii, result)
+    bottleneck = _Card("瓶颈", tone="quiet")
+    bottleneck.set_note(result.bottleneck)
+    cards: list[QWidget] = [status, dimensions]
+    # Same condition the view uses to show or hide this card; a freshly built widget
+    # reads as hidden either way, so the state cannot be read off the card itself.
+    if result.inputs.optimises_offsets and not result.infeasible:
+        offsets = _Card("路径偏移")
+        fill_offsets(offsets, result)
+        cards.append(offsets)
+    cards += [radii, bottleneck]
+    for card in cards:
+        card.setVisible(True)
+    return cards

@@ -703,3 +703,17 @@ def test_the_sidebar_content_fits_its_viewport_under_pareto(qtbot: QtBot) -> Non
     side = panel.findChild(QScrollArea)
     assert side is not None
     assert side.widget().minimumSizeHint().width() <= side.viewport().width()
+
+
+def test_the_export_button_arms_after_a_result_and_asks_the_window_to_export(
+    qtbot: QtBot,
+) -> None:
+    panel = ScenarioPanel()
+    qtbot.addWidget(panel)
+    assert not panel._export_button.isEnabled()
+    panel.resize(1240, 720)
+    panel.show()
+    _settled(qtbot, panel)
+    assert panel._export_button.isEnabled()
+    with qtbot.waitSignal(panel.export_pdf_requested, timeout=1000):
+        panel._export_button.click()
