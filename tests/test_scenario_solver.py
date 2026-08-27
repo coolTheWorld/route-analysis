@@ -53,9 +53,9 @@ PROTOTYPE_END_WALL = 0.15
 
 PROTOTYPE_INDEPENDENCE = """夹具的独立性对场景而言并不一致，这一点值得写明。
 
-原型是设计交付稿先写的，Python 由它移植而来，所以两边一致证明的是移植忠实。借支路
-与双向 U 型两个场景后来按需求方的确认改了机动，原型随之同步 —— 那两处的机动形状因此
-不再是独立佐证，等于同一份理解写了两遍。
+原型是设计交付稿先写的，Python 由它移植而来，所以两边一致证明的是移植忠实。借支路、
+双向 U 型与直角转弯三个场景后来按需求方的确认改了机动（直角改为自支路起步驶出主路），
+原型随之同步 —— 这三处的机动形状因此不再是独立佐证，等于同一份理解写了两遍。
 
 仍然独立的部分是求值链路本身：原型自己算线段间距与点在多边形内，Python 走 shapely 的
 向量化接口，两条完全不同的路。区域构造、位姿采样、镜像与净距计算对全部四个场景依旧
@@ -435,7 +435,8 @@ def test_pose_sampling_puts_the_body_where_the_gear_says():
     samples = sample_poses(layout.maneuvers[0].primitives, DIMENSIONS, FINE)
     assert len(samples) > 100
     lead = samples.corners[0][0]
-    assert lead[0] == pytest.approx(samples.x[0] + DIMENSIONS.center_front, abs=1e-9)
+    # The maneuver sets off in the branch heading south, nose first in D.
+    assert lead[1] == pytest.approx(samples.y[0] - DIMENSIONS.center_front, abs=1e-9)
 
 
 def test_forward_solution_reports_the_ceiling_even_when_it_succeeds():
@@ -670,15 +671,21 @@ def test_a_fully_pinned_road_that_fits_with_offsets_is_not_judged_outside():
 
     result = solve_scenario(
         _pareto(scenario=Scenario.CORNER),
-        RoadDimensions(wa=3.0, wb=2.2),
+        RoadDimensions(wa=2.3, wb=3.3),
         pins=Pins.all_dims(Scenario.CORNER),
     )
+    assert result.centred_clearance is not None
+    assert result.centred_clearance < result.inputs.threshold
     assert result.status is ClearanceStatus.SAFE, result.min_clearance
-    assert result.offsets.ea > 0.2 and result.offsets.eb > 0.1
+    assert result.offsets.ea > 0.1 and result.offsets.eb > 0.1
 
 
 def test_pinning_a_dimension_still_drives_the_rest_to_a_real_limit():
-    """With the trunk pinned at 3.0 m the branch must come out well under the plateau answer."""
+    """With the exit leg pinned wide the entry branch must come out well under centreline.
+
+    The centreline answer needs a 3.64 m branch; freeing the offsets around the pinned
+    3.0 m exit leg has to buy a substantially narrower one, not stall on a plateau.
+    """
 
     result = solve_scenario(
         _pareto(scenario=Scenario.CORNER),
@@ -686,7 +693,7 @@ def test_pinning_a_dimension_still_drives_the_rest_to_a_real_limit():
         pins=Pins(dims=frozenset({"wa"})),
     )
     assert result.solved_keys == ("wb",)
-    assert result.dims.wb < 2.25, result.dims
+    assert result.dims.wb < 2.65, result.dims
     assert result.min_clearance >= result.inputs.threshold - 1e-3
 
 
@@ -797,12 +804,12 @@ def test_checking_the_solved_road_or_a_wider_one_never_reads_worse_than_the_solv
     """
 
     inputs = _pareto(scenario=Scenario.CORNER)
-    solved = solve_scenario(inputs, RoadDimensions(wb=2.2), pins=Pins(dims=frozenset({"wb"})))
+    solved = solve_scenario(inputs, RoadDimensions(wb=3.3), pins=Pins(dims=frozenset({"wb"})))
     assert solved.status is ClearanceStatus.SAFE
     for extra in (0.0, 0.01, 0.03, 0.06):
         checked = solve_scenario(
             inputs,
-            RoadDimensions(wa=solved.dims.wa + extra, wb=2.2),
+            RoadDimensions(wa=solved.dims.wa + extra, wb=3.3),
             pins=Pins.all_dims(Scenario.CORNER),
         )
         assert checked.status is ClearanceStatus.SAFE, (extra, checked.min_clearance)

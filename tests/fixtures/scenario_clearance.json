@@ -65,571 +65,13 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.038094418410880015,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 2.6,
-    "wB": 2.6,
-    "wV": 2.7,
-    "wH": 3,
-    "LS": 3,
-    "w": 2.4,
-    "b": 1.2,
-    "D": 3.6
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.5880944184108803,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 3,
-    "b": 1,
-    "D": 4.5
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.03809441841088024,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 3,
-    "b": 1,
-    "D": 4.5
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 3,
-    "b": 1,
-    "D": 4.5
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.3880944184108803,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3.4,
-    "wB": 3.2,
-    "wV": 3.3,
-    "wH": 3.8,
-    "LS": 4.6,
-    "w": 3.2,
-    "b": 0.9,
-    "D": 5
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3.4,
-    "wB": 3.2,
-    "wV": 3.3,
-    "wH": 3.8,
-    "LS": 4.6,
-    "w": 3.2,
-    "b": 0.9,
-    "D": 5
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3.4,
-    "wB": 3.2,
-    "wV": 3.3,
-    "wH": 3.8,
-    "LS": 4.6,
-    "w": 3.2,
-    "b": 0.9,
-    "D": 5
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.18809441841088037,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 4.2,
-    "wB": 3.6,
-    "wV": 3.8,
-    "wH": 4.4,
-    "LS": 5.2,
-    "w": 3.6,
-    "b": 0.8,
-    "D": 6
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 4.2,
-    "wB": 3.6,
-    "wV": 3.8,
-    "wH": 4.4,
-    "LS": 5.2,
-    "w": 3.6,
-    "b": 0.8,
-    "D": 6
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 4.2,
-    "wB": 3.6,
-    "wV": 3.8,
-    "wH": 4.4,
-    "LS": 5.2,
-    "w": 3.6,
-    "b": 0.8,
-    "D": 6
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 5.5,
-    "wB": 5,
-    "wV": 5,
-    "wH": 5.5,
-    "LS": 6.5,
-    "w": 4.5,
-    "b": 1.4,
-    "D": 7.5
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 5.5,
-    "wB": 5,
-    "wV": 5,
-    "wH": 5.5,
-    "LS": 6.5,
-    "w": 4.5,
-    "b": 1.4,
-    "D": 7.5
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 5.5,
-    "wB": 5,
-    "wV": 5,
-    "wH": 5.5,
-    "LS": 6.5,
-    "w": 4.5,
-    "b": 1.4,
-    "D": 7.5
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 1.8,
-    "b": 0.6,
-    "D": 4.5
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.03809441841088024,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 1.8,
-    "b": 0.6,
-    "D": 4.5
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": 0.15000000000000036,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "D",
-   "dims": {
-    "wA": 3,
-    "wB": 3,
-    "wV": 3,
-    "wH": 3.5,
-    "LS": 4,
-    "w": 1.8,
-    "b": 0.6,
-    "D": 4.5
-   },
-   "off": {
-    "eA": -0.35,
-    "eB": 0.4,
-    "eV": -0.3,
-    "eH": 0.35,
-    "a": -0.2,
-    "so": 0.3,
-    "e1": -0.25,
-    "e2": -0.4,
-    "eo": 0.5,
-    "yc": -0.6
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.3880944184108803,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "R",
-   "dims": {
-    "wA": 2.6,
-    "wB": 2.6,
-    "wV": 2.7,
-    "wH": 3,
-    "LS": 3,
-    "w": 2.4,
-    "b": 1.2,
-    "D": 3.6
-   },
-   "off": {
-    "eA": 0,
-    "eB": 0,
-    "eV": 0,
-    "eH": 0,
-    "a": 0,
-    "so": 0,
-    "e1": 0,
-    "e2": 0,
-    "eo": 0,
-    "yc": 0
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
-   "clearance": -0.2380944184108802,
-   "buildable": true
-  },
-  {
-   "type": "corner",
-   "bidir": false,
-   "gear": "R",
-   "dims": {
-    "wA": 2.6,
-    "wB": 2.6,
-    "wV": 2.7,
-    "wH": 3,
-    "LS": 3,
-    "w": 2.4,
-    "b": 1.2,
-    "D": 3.6
-   },
-   "off": {
-    "eA": 0.2,
-    "eB": -0.15,
-    "eV": 0.1,
-    "eH": -0.2,
-    "a": 0.25,
-    "so": -0.1,
-    "e1": 0.3,
-    "e2": 0.15,
-    "eo": -0.2,
-    "yc": 0.4
-   },
-   "arc_step": 0.015,
-   "line_step": 0.06,
    "clearance": -0.3880944184108801,
    "buildable": true
   },
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -660,7 +102,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -691,7 +133,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -722,7 +164,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -753,7 +195,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -784,7 +226,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -815,7 +257,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -846,7 +288,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -877,7 +319,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -908,7 +350,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -939,7 +381,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -970,7 +412,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -1001,7 +443,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -1032,7 +474,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1063,7 +505,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1094,7 +536,7 @@
   {
    "type": "corner",
    "bidir": false,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1124,8 +566,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1155,8 +597,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1181,13 +623,13 @@
    },
    "arc_step": 0.015,
    "line_step": 0.06,
-   "clearance": -0.03809441841088046,
+   "clearance": -0.038094418410880015,
    "buildable": true
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1217,8 +659,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1248,8 +690,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1279,8 +721,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1310,8 +752,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1341,8 +783,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1372,8 +814,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1403,8 +845,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -1434,8 +876,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -1465,8 +907,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -1496,8 +938,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -1527,8 +969,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -1558,8 +1000,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -1589,8 +1031,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1620,8 +1062,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1651,8 +1093,8 @@
   },
   {
    "type": "corner",
-   "bidir": true,
-   "gear": "D",
+   "bidir": false,
+   "gear": "R",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1683,7 +1125,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1714,7 +1156,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1745,7 +1187,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 2.6,
     "wB": 2.6,
@@ -1776,7 +1218,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1807,7 +1249,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1838,7 +1280,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -1869,7 +1311,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1900,7 +1342,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1931,7 +1373,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3.4,
     "wB": 3.2,
@@ -1962,7 +1404,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -1993,7 +1435,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -2024,7 +1466,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 4.2,
     "wB": 3.6,
@@ -2055,7 +1497,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -2086,7 +1528,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -2117,7 +1559,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 5.5,
     "wB": 5,
@@ -2148,7 +1590,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -2179,7 +1621,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -2210,7 +1652,7 @@
   {
    "type": "corner",
    "bidir": true,
-   "gear": "R",
+   "gear": "D",
    "dims": {
     "wA": 3,
     "wB": 3,
@@ -2236,6 +1678,564 @@
    "arc_step": 0.015,
    "line_step": 0.06,
    "clearance": -0.022765921041651094,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 2.6,
+    "wB": 2.6,
+    "wV": 2.7,
+    "wH": 3,
+    "LS": 3,
+    "w": 2.4,
+    "b": 1.2,
+    "D": 3.6
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.2380944184108802,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 2.6,
+    "wB": 2.6,
+    "wV": 2.7,
+    "wH": 3,
+    "LS": 3,
+    "w": 2.4,
+    "b": 1.2,
+    "D": 3.6
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.03809441841088046,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 2.6,
+    "wB": 2.6,
+    "wV": 2.7,
+    "wH": 3,
+    "LS": 3,
+    "w": 2.4,
+    "b": 1.2,
+    "D": 3.6
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.5880944184108803,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 3,
+    "b": 1,
+    "D": 4.5
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.03809441841088024,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 3,
+    "b": 1,
+    "D": 4.5
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 3,
+    "b": 1,
+    "D": 4.5
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.3880944184108803,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3.4,
+    "wB": 3.2,
+    "wV": 3.3,
+    "wH": 3.8,
+    "LS": 4.6,
+    "w": 3.2,
+    "b": 0.9,
+    "D": 5
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3.4,
+    "wB": 3.2,
+    "wV": 3.3,
+    "wH": 3.8,
+    "LS": 4.6,
+    "w": 3.2,
+    "b": 0.9,
+    "D": 5
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3.4,
+    "wB": 3.2,
+    "wV": 3.3,
+    "wH": 3.8,
+    "LS": 4.6,
+    "w": 3.2,
+    "b": 0.9,
+    "D": 5
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.18809441841088037,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 4.2,
+    "wB": 3.6,
+    "wV": 3.8,
+    "wH": 4.4,
+    "LS": 5.2,
+    "w": 3.6,
+    "b": 0.8,
+    "D": 6
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 4.2,
+    "wB": 3.6,
+    "wV": 3.8,
+    "wH": 4.4,
+    "LS": 5.2,
+    "w": 3.6,
+    "b": 0.8,
+    "D": 6
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 4.2,
+    "wB": 3.6,
+    "wV": 3.8,
+    "wH": 4.4,
+    "LS": 5.2,
+    "w": 3.6,
+    "b": 0.8,
+    "D": 6
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 5.5,
+    "wB": 5,
+    "wV": 5,
+    "wH": 5.5,
+    "LS": 6.5,
+    "w": 4.5,
+    "b": 1.4,
+    "D": 7.5
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 5.5,
+    "wB": 5,
+    "wV": 5,
+    "wH": 5.5,
+    "LS": 6.5,
+    "w": 4.5,
+    "b": 1.4,
+    "D": 7.5
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 5.5,
+    "wB": 5,
+    "wV": 5,
+    "wH": 5.5,
+    "LS": 6.5,
+    "w": 4.5,
+    "b": 1.4,
+    "D": 7.5
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 1.8,
+    "b": 0.6,
+    "D": 4.5
+   },
+   "off": {
+    "eA": 0,
+    "eB": 0,
+    "eV": 0,
+    "eH": 0,
+    "a": 0,
+    "so": 0,
+    "e1": 0,
+    "e2": 0,
+    "eo": 0,
+    "yc": 0
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.03809441841088024,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 1.8,
+    "b": 0.6,
+    "D": 4.5
+   },
+   "off": {
+    "eA": 0.2,
+    "eB": -0.15,
+    "eV": 0.1,
+    "eH": -0.2,
+    "a": 0.25,
+    "so": -0.1,
+    "e1": 0.3,
+    "e2": 0.15,
+    "eo": -0.2,
+    "yc": 0.4
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": 0.15000000000000036,
+   "buildable": true
+  },
+  {
+   "type": "corner",
+   "bidir": true,
+   "gear": "R",
+   "dims": {
+    "wA": 3,
+    "wB": 3,
+    "wV": 3,
+    "wH": 3.5,
+    "LS": 4,
+    "w": 1.8,
+    "b": 0.6,
+    "D": 4.5
+   },
+   "off": {
+    "eA": -0.35,
+    "eB": 0.4,
+    "eV": -0.3,
+    "eH": 0.35,
+    "a": -0.2,
+    "so": 0.3,
+    "e1": -0.25,
+    "e2": -0.4,
+    "eo": 0.5,
+    "yc": -0.6
+   },
+   "arc_step": 0.015,
+   "line_step": 0.06,
+   "clearance": -0.3880944184108803,
    "buildable": true
   },
   {

@@ -102,10 +102,11 @@ def test_gear_swaps_the_overhangs_along_the_travel_direction():
     reverse = build_layout(
         _inputs(scenario=Scenario.CORNER, gear=Gear.REVERSE), RoadDimensions(), Offsets()
     )
-    drive_entry = drive.maneuvers[0].primitives[0].start[0]
-    reverse_entry = reverse.maneuvers[0].primitives[0].start[0]
+    # The entry leg now runs down the branch, so the trim shows on the y axis.
+    drive_entry = drive.maneuvers[0].primitives[0].start[1]
+    reverse_entry = reverse.maneuvers[0].primitives[0].start[1]
     assert drive_entry - reverse_entry == pytest.approx(
-        DIMENSIONS.center_rear - DIMENSIONS.center_front
+        DIMENSIONS.center_front - DIMENSIONS.center_rear
     )
 
 
@@ -219,7 +220,7 @@ def test_variant_names_match_the_sketch_list():
 
 
 def test_dimension_labels_follow_the_traffic_direction():
-    assert dimension_label(Scenario.CORNER, "wa", bidirectional=False) == "进入道宽"
+    assert dimension_label(Scenario.CORNER, "wa", bidirectional=False) == "驶出道宽"
     assert dimension_label(Scenario.CORNER, "wa", bidirectional=True) == "主路宽"
 
 
@@ -267,9 +268,9 @@ def test_the_two_way_uturn_middle_aisle_has_a_row_but_no_variable():
 
 
 def test_offset_labels_follow_the_traffic_direction():
-    assert offset_label(Scenario.CORNER, "ea", bidirectional=False) == "进入道偏移"
+    assert offset_label(Scenario.CORNER, "ea", bidirectional=False) == "驶出道偏移"
     assert offset_label(Scenario.CORNER, "ea", bidirectional=True) == "主路偏移"
-    assert offset_label(Scenario.CORNER, "eb", bidirectional=False) == "驶出道偏移"
+    assert offset_label(Scenario.CORNER, "eb", bidirectional=False) == "进入道偏移"
     assert offset_label(Scenario.CORNER, "eb", bidirectional=True) == "支路偏移"
     assert offset_label(Scenario.UTURN, "yc", bidirectional=True) == "起弯点"
     # A key the layout does not list falls back to the generic name, then to the key.

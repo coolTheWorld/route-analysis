@@ -608,13 +608,14 @@ class Component extends DCLogic {
           : [[-LA, -wA / 2], [wB / 2, -wA / 2], [wB / 2, LB], [-wB / 2, LB], [-wB / 2, wA / 2], [-LA, wA / 2]];
         const ay = eA, bx = -eB;
         const tr0 = gear === 'D' ? Lr : Lf, ld0 = gear === 'D' ? Lf : Lr;
+        // 自支路起步、转出主路：反过来跑，双向的两条镜像机动会在共用支路里迎头相对。
         const prims = [
-          { t: 'L', a: [-LA + tr0 + 0.15, ay], b: [bx - R, ay], g: gear },
-          { t: 'A', c: [bx - R, ay + R], r: R, a0: -PI / 2, a1: 0, g: gear },
-          { t: 'L', a: [bx, ay + R], b: [bx, LB - ld0 - 0.15], g: gear },
+          { t: 'L', a: [bx, LB - tr0 - 0.15], b: [bx, ay + R], g: gear },
+          { t: 'A', c: [bx - R, ay + R], r: R, a0: 0, a1: -PI / 2, g: gear },
+          { t: 'L', a: [bx - R, ay], b: [-LA + ld0 + 0.15, ay], g: gear },
         ];
-        const mans = [{ prims, label: bidir ? '西侧进入' : '转弯段' }];
-        if (bidir) mans.push({ prims: mirror(prims), label: '东侧进入' });
+        const mans = [{ prims, label: bidir ? '向西驶出' : '转弯段' }];
+        if (bidir) mans.push({ prims: mirror(prims), label: '向东驶出' });
         const centers = bidir
           ? [[[-LA, 0], [LA, 0]], [[0, -wA / 2], [0, LB]]]
           : [[[-LA, 0], [wB / 2, 0]], [[0, -wA / 2], [0, LB]]];

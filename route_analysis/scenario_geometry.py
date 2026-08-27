@@ -67,8 +67,8 @@ SOLVED_KEYS: dict[Scenario, tuple[str, ...]] = {
 
 DIMENSION_LABELS: dict[Scenario, dict[str, tuple[str, str]]] = {
     Scenario.CORNER: {
-        "wa": ("进入道宽", "主路宽"),
-        "wb": ("驶出道宽", "支路宽"),
+        "wa": ("驶出道宽", "主路宽"),
+        "wb": ("进入道宽", "支路宽"),
     },
     Scenario.CROSSBACK: {
         "wv": ("倒车道宽", "倒车道宽"),
@@ -88,7 +88,7 @@ DIMENSION_LABELS: dict[Scenario, dict[str, tuple[str, str]]] = {
 
 
 def dimension_label(scenario: Scenario, key: str, *, bidirectional: bool) -> str:
-    """Names differ by traffic direction: an L junction entry leg is a T junction trunk."""
+    """Names differ by traffic direction: an L junction exit leg is a T junction trunk."""
 
     names = DIMENSION_LABELS[scenario].get(key)
     if names is None:
@@ -274,7 +274,7 @@ def offset_rows(scenario: Scenario, *, bidirectional: bool) -> tuple[OffsetRow, 
     if scenario is Scenario.CORNER:
         if bidirectional:
             return (OffsetRow("ea", "主路偏移"), OffsetRow("eb", "支路偏移", shared=True))
-        return (OffsetRow("ea", "进入道偏移"), OffsetRow("eb", "驶出道偏移"))
+        return (OffsetRow("ea", "驶出道偏移"), OffsetRow("eb", "进入道偏移"))
     if scenario is Scenario.CROSSBACK:
         return (
             OffsetRow("ev", "倒车道偏移", shared=bidirectional),
@@ -411,14 +411,17 @@ def _corner(
     lead, trail = _overhangs(gear, vehicle)
     ay = ea
     bx = -eb
+    # The maneuver sets off in the branch and turns out into the trunk. Running it the
+    # other way round would, in a T junction, have both mirrored maneuvers finishing nose
+    # to nose in the branch they share -- the same mistake the two-way U-turn had.
     primitives = (
-        Line((-la + trail + 0.15, ay), (bx - radius, ay), gear),
-        Arc((bx - radius, ay + radius), radius, -math.pi / 2, 0.0, gear),
-        Line((bx, ay + radius), (bx, lb - lead - 0.15), gear),
+        Line((bx, lb - trail - 0.15), (bx, ay + radius), gear),
+        Arc((bx - radius, ay + radius), radius, 0.0, -math.pi / 2, gear),
+        Line((bx - radius, ay), (-la + lead + 0.15, ay), gear),
     )
-    maneuvers = [Maneuver("西侧进入" if inputs.bidirectional else "转弯段", primitives)]
+    maneuvers = [Maneuver("向西驶出" if inputs.bidirectional else "转弯段", primitives)]
     if inputs.bidirectional:
-        maneuvers.append(Maneuver("东侧进入", _mirror(primitives)))
+        maneuvers.append(Maneuver("向东驶出", _mirror(primitives)))
     return ScenarioLayout(
         region=region,
         maneuvers=tuple(maneuvers),
