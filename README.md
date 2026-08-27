@@ -93,7 +93,7 @@ Linux x64：
 
 发布目录为 `dist/RouteAnalysis/`，入口为 `RouteAnalysis`。`build.sh` 依次执行架构与 glibc 基线检查、pytest、Ruff、mypy、PyInstaller 构建、ELF 产物校验，然后先用 `QT_QPA_PLATFORM=offscreen` 跑一次打包烟雾，再在检测到显示会话时用真实平台插件跑第二次；没有显示会话时跳过第二次并告警说明平台插件未经验证。最后打印产物文件数、总字节数、入口可执行文件的 SHA-256 和运行基线。
 
-PyInstaller 不做交叉编译：Linux 发布物必须在 Linux 上构建，Windows 发布物必须在 Windows 上构建。Linux 产物动态链接构建机的 glibc，只能在同版本或更新的发行版上启动；当前基线为 x86_64 加 glibc 2.43。构建机没有安装 UPX 时 PyInstaller 会自动跳过压缩，产物体积因此大于 Windows 版。
+PyInstaller 不做交叉编译：Linux 发布物必须在 Linux 上构建，Windows 发布物必须在 Windows 上构建。本地之外也可在 GitHub Actions 上构建：`build` 工作流（手动触发或推送 `v*` 标签）在 ubuntu-24.04 与 windows-latest 上分别跑同一套构建脚本并上传产物，打标签时自动发布 Release；Actions 构建的 Linux 产物基线为 glibc 2.39（取 runner 的 glibc），兼容面比本地构建更大。Linux 产物动态链接构建机的 glibc，只能在同版本或更新的发行版上启动；当前基线为 x86_64 加 glibc 2.43。构建机没有安装 UPX 时 PyInstaller 会自动跳过压缩，产物体积因此大于 Windows 版。
 
 单独验证 Linux 发布物：
 
