@@ -1,5 +1,5 @@
 ---
-status: superseded by ADR-0004
+status: amended by ADR-0004
 ---
 
 # 在本地配置中明文保存连接凭据

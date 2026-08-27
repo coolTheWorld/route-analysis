@@ -1,3 +1,23 @@
+# 0.6.0 发布核对
+
+日期：2026-08-27
+目标：Linux x64 与 Windows x64 文件夹发布物（GitHub Actions `build` 工作流，标签 `v0.6.0`）
+
+## 质量门禁
+
+- [x] pytest 448 项：CI（ubuntu-24.04，装有中文字体）全部通过；本地开发机 446 通过、2 项 PDF 中文用例因缺中文字体不可验证（既知盲区，见 tasks/todo.md）。
+- [x] Ruff 全项目检查通过。
+- [x] mypy 对 36 个源码模块检查通过。
+- [x] 打包 `--smoke-test` 两平台通过（runner 无显示会话，Linux 真实平台插件烟雾按脚本设计跳过并告警）。
+- [x] Actions 运行 33031746068 全绿：Linux 构建、Windows 构建、Release 发布。
+
+## 发布物
+
+- [x] GitHub Release v0.6.0：`RouteAnalysis-v0.6.0-linux-x64.tar.gz`（x86_64，glibc ≥ 2.39，tar 保留可执行位）与 `RouteAnalysis-v0.6.0-windows-x64.zip`。
+- [x] 两平台均为文件夹发布物，整目录复制使用；首次运行在入口同级创建 `data/` 与 `log/`。
+
+---
+
 # 0.4.0 发布核对
 
 日期：2026-08-16
